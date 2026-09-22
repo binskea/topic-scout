@@ -174,8 +174,17 @@ a known double-redirect title in Milestone 0]`
 
 ## Milestone 0 verification checklist (run in an unrestricted environment)
 
-Run each of these with a real, descriptive `User-Agent` header, save the raw
-JSON response as a `tests/cassettes/` fixture, and update this file's tags:
+`verify_live_api.sh` (in this same directory) automates all of the checks
+below with a proper `User-Agent` header and saves every raw response to
+`./milestone0-responses/` — run it on a machine with normal internet access
+(this project's dev sessions in the `Default` Claude Code on-the-web
+environment cannot reach these domains at all; see `PLAN.md` Milestone 0
+and `SPEC.md` §9 item 8). Paste its output back to turn the responses into
+`tests/cassettes/` fixtures and update this file's tags below.
+
+Manually, each of these should be run with a real, descriptive `User-Agent`
+header, its raw JSON response saved as a `tests/cassettes/` fixture, and
+this file's tags updated accordingly:
 
 1. Per-article, ordinary case (e.g. `en.wikipedia`, a well-known article,
    `agent=user`, a 7–30 day daily range) — confirm response shape, confirm

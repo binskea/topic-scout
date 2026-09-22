@@ -514,11 +514,30 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
    Cyrillic natively. The PDF path needs a bundled Cyrillic-capable font
    under `assets/fonts/` if the default WeasyPrint/system font lacks the
    glyphs — a concrete check item for the report milestone, not a v2 nicety.
-8. **Milestone 0 as a hard dependency.** Needs to run on an unrestricted
-   machine (this dev session's egress proxy blocks all Wikimedia/Wikidata
-   domains) before the fetch/cache milestones are trusted — flagged
-   explicitly in `PLAN.md` so it can't be accidentally skipped once things
-   "look like they work" against assumed API shapes.
+8. **Milestone 0 as a hard dependency — and a structural gap, not just this
+   session's.** Confirmed (2026-09-22) that this account's *only* available
+   Claude Code on-the-web environment (`Default`) blocks all Wikimedia/
+   Wikidata domains, in two independent cloud sessions — this isn't a
+   one-off fluke of the current conversation, it's this account's entire
+   cloud setup. Milestone 0 is being completed via a manual handoff instead
+   (a verification script run on the requester's own machine, its output
+   pasted back to turn into `tests/cassettes/` fixtures). That workaround is
+   viable exactly once, cheaply, precisely because AQS data for closed
+   months is immutable and the resulting cassettes are reused indefinitely
+   by every later milestone — but it doesn't scale to "re-verify whenever
+   we're unsure," and it means no cloud session in this account can
+   independently fetch *new* live data (e.g. re-running Milestone 0's
+   checklist after a schema/behavior change, or the day this skill needs a
+   real non-cassette smoke test). Worth deciding before that need arises:
+   (a) ask whoever administers this Claude Code account/org to allow
+   egress to `wikimedia.org`/`*.wikipedia.org`/`*.wikidata.org`/
+   `api.wikimedia.org` for the `Default` environment (the durable fix), or
+   (b) accept manual paste-back as a standing, documented process (not just
+   a one-time bootstrap) and design for it explicitly — e.g. keep this
+   verification script under version control (`curiosity-radar/references/
+   verify_live_api.sh` or similar) rather than a scratch file, so re-running
+   it later is a known, repeatable step rather than reconstructed from
+   scratch.
 9. **PDF engine auto-detection edge cases.** `--engine auto`'s
    "importable at runtime" check for WeasyPrint needs to also probe that
    its *system* libraries (not just the Python package) actually load

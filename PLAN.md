@@ -16,9 +16,24 @@ documented/memorized knowledge, not a real request, and is tagged
 finished — even if their code "looks like it works" against assumed shapes
 — until this runs.
 
+**Confirmed 2026-09-22: this is not fixable from within this account's
+cloud environments.** Both this dev session and a second, independently
+launched Claude Code on-the-web session (same account, its only available
+environment) hit the identical proxy block. Real verification is being
+done via a **manual handoff**: `curiosity-radar/references/
+verify_live_api.sh` is run by the requester on their own machine (normal
+internet access), and its output is pasted back to build the cassette
+fixtures below. This works cleanly as a one-time bootstrap (AQS data for
+closed months is immutable, so the resulting cassettes are reused
+indefinitely), but see `SPEC.md` §9 item 8 for why it isn't a scalable
+long-term answer — decide on a durable fix (org egress allowlist for this
+environment, most likely) before the day this skill needs a fresh, real
+API check rather than a replayed cassette.
+
 **Definition of done:**
-- Run, in an unrestricted environment (the requester's own machine, or a
-  session with egress allowed), every item in `references/api-notes.md`'s
+- Run `curiosity-radar/references/verify_live_api.sh` in an unrestricted
+  environment (the requester's own machine, or a future session with
+  egress allowed), covering every item in `references/api-notes.md`'s
   "Milestone 0 verification checklist" (10 items: ordinary per-article,
   known-zero-day per-article, redirect-title per-article, aggregate,
   ambiguous Wikidata search, missing-sitelink QID, single vs. double
