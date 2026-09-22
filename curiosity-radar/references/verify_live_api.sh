@@ -51,7 +51,7 @@ echo "-- 5. Wikidata search, deliberately ambiguous query ('Mercury') --"
 req "5-wikidata-ambiguous" "05_wikidata_search_ambiguous.json" \
   "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=Mercury&language=en&format=json&limit=10"
 
-echo "-- 6. Wikidata sitelinks for Q1631107 (intermittent fasting) --"
+echo "-- 6. Wikidata sitelinks for Q1631107 (a QID used to check the sitelinks response shape -- turned out to be 'Bibliography', not a real topic example; kept for shape-checking only) --"
 req "6-wikidata-sitelinks" "06_wikidata_sitelinks.json" \
   "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q1631107&props=sitelinks&format=json"
 

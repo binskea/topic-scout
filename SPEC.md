@@ -8,8 +8,18 @@ with explicit assumptions and limitations. See `TASK.md` for the full brief
 and `PLAN.md` for how this gets built incrementally.
 
 This document is the frozen architecture reference. `CLAUDE.md` covers dev
-conventions; `curiosity-radar/references/api-notes.md` covers the (currently
-unverified-live) Wikimedia/Wikidata API contracts this design depends on.
+conventions; `curiosity-radar/references/api-notes.md` covers the Wikimedia/
+Wikidata API contracts this design depends on.
+
+**Updated 2026-09-22 after Milestone 0's live verification** (see
+`api-notes.md` and `tests/cassettes/milestone0/README.md` for full detail).
+Two findings changed this design: (1) AQS pageviews tracks redirect titles
+as separate traffic from their canonical target, so `fetch` (§3.2) now
+sums canonical + one known redirect alias per language; (2) an earlier
+draft's worked examples used a memorized Wikidata QID (`Q1631107`) that
+turned out to be wrong (it's "Bibliography," not the intended topic) — all
+examples below now use an explicit `Q_EXAMPLE` placeholder, and `resolve`
+must always look up QIDs live, never hardcode one.
 
 ## 1. Directory layout
 
@@ -183,14 +193,21 @@ Inputs: `--topic "<text>"` (required unless `--qid`), `--qid Q...`,
 `--languages en,pl,cs,uk` (required), `--related-qids Q...,Q...` (optional),
 `--save-as <project-slug>` (optional — creates/updates a project), `--data-dir`.
 
+`Q_EXAMPLE` below is a placeholder, not a real Wikidata ID — Milestone 0
+caught an earlier draft of this doc using a memorized, incorrect QID as a
+worked example (it resolved to "Bibliography," not the intended topic; see
+`curiosity-radar/references/api-notes.md`). `resolve` must always look QIDs
+up live via `wbsearchentities`/`wbgetentities`; nothing in this codebase
+hardcodes one.
+
 ```json
 {
   "topic_query": "intermittent fasting",
-  "resolved_qid": "Q1631107",
-  "candidates": [{"qid": "Q1631107", "label": "intermittent fasting", "description": "...", "score": 0.94}],
+  "resolved_qid": "Q_EXAMPLE",
+  "candidates": [{"qid": "Q_EXAMPLE", "label": "intermittent fasting", "description": "...", "match_type": "label"}],
   "ambiguous": false,
   "cluster": {
-    "primary_qid": "Q1631107",
+    "primary_qid": "Q_EXAMPLE",
     "related_qids": [],
     "articles": {
       "pl": {"title": "Głodówka przerywana", "wiki": "pl.wikipedia", "redirect_from": null, "exists": true},
@@ -201,6 +218,23 @@ Inputs: `--topic "<text>"` (required unless `--qid`), `--qid Q...`,
   "warnings": ["uk: no Wikidata sitelink for this QID"]
 }
 ```
+`candidates` has no numeric relevance score — real `wbsearchentities`
+responses don't return one (confirmed in Milestone 0). Ambiguity is
+conveyed by list order (server-ranked) plus `match_type` (`"label"` vs.
+`"alias"`); an invented `score` field from an earlier draft has been
+removed.
+
+**Redirect aliases are tracked separately by AQS pageviews** — confirmed in
+Milestone 0, a redirect title (e.g. `cs`'s `Intermitentní půst` above)
+receives its own real, distinct traffic, separate from the canonical title
+it points to. So when `redirect_from` is non-null for a language, `fetch`
+(§3.2) fetches pageviews for **both** the canonical title and that redirect
+alias and sums them into that language's series — otherwise readers who
+land via the old/alternate title would be silently undercounted. This only
+covers the one redirect `resolve` already discovered on the way to the
+canonical title; enumerating *every* title that redirects to an article
+(a full MediaWiki backlinks-of-redirects query) is out of scope for v1 and
+called out in Limitations (§8).
 
 ### 3.2 `fetch`
 Pull/update pageview + project-aggregate data for a saved project's current
@@ -217,14 +251,19 @@ last 730 days, clamped with a warning to AQS's actual earliest date — see
 ```json
 {
   "project": "intermittent-fasting-pl-cs",
-  "fetched": {"articles_fetched": 2, "days_requested": 730, "days_from_cache": 700, "days_freshly_fetched": 30, "http_requests_made": 4},
+  "fetched": {"articles_fetched": 2, "redirect_aliases_fetched": 1, "days_requested": 730, "days_from_cache": 700, "days_freshly_fetched": 30, "http_requests_made": 4},
   "coverage": {
-    "pl": {"wiki": "pl.wikipedia", "article": "Głodówka przerywana", "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 4},
-    "cs": {"wiki": "cs.wikipedia", "article": "Přerušovaný půst", "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 1}
+    "pl": {"wiki": "pl.wikipedia", "article": "Głodówka przerywana", "redirect_alias_included": null, "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 4},
+    "cs": {"wiki": "cs.wikipedia", "article": "Přerušovaný půst", "redirect_alias_included": "Intermitentní půst", "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 1}
   },
   "warnings": []
 }
 ```
+`redirect_alias_included` records whether that language's series is the
+canonical title alone (`null`) or canonical + one summed redirect alias
+(the alias's title) — surfaced so `analyze`/the report's Assumptions box
+can state plainly whether redirect traffic was folded in for that
+language.
 No raw daily arrays in stdout — those live only in `cache/raw/`.
 
 ### 3.3 `analyze`
@@ -331,7 +370,7 @@ Subcommands: `project list`; `project show --project <slug>`; `project set
 ```json
 {
   "project": "intermittent-fasting-pl-cs",
-  "topic": {"qid": "Q1631107", "query": "intermittent fasting"},
+  "topic": {"qid": "Q_EXAMPLE", "query": "intermittent fasting"},
   "languages": ["pl", "cs"],
   "date_range": {"start": "2023-09-22", "end": "2026-09-21"},
   "exclusions": [],
@@ -416,7 +455,8 @@ Section order, top to bottom:
 6. **Assumptions** — boxed, same visual weight as body text (never
    footnote-sized): normalization method, `agent=user` filter, date range
    actually used post-exclusions, placebo basket size, redirect resolution
-   applied.
+   applied and whether a redirect alias's traffic was folded into the
+   count for each language (per `fetch`'s `redirect_alias_included`).
 7. **Limitations** — equally prominent: pageview data reflects Wikipedia
    readership only, not search demand or purchase intent; short/noisy
    series near AQS's start date are unreliable; topic-to-article mapping
@@ -476,6 +516,11 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
   without a clean 1:1 Wikidata sitelink per language.
 - All comparisons are normalized (share of project traffic), not raw view
   counts — stated explicitly since it's easy to misread as raw popularity.
+- Only one redirect alias per language (the one found while resolving to
+  the canonical title) is folded into view counts — confirmed via
+  Milestone 0 that AQS tracks redirect titles as separate traffic streams.
+  Other, unrelated titles that also redirect to the same article are not
+  discovered or included, so totals can still be a modest undercount.
 
 ## 9. Open Questions & Risks (for the requester)
 

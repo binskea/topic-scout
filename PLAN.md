@@ -5,7 +5,7 @@ directory to a working, evaluated Agent Skill. Each has a concrete
 definition of done. See `SPEC.md` for the target architecture and
 `CLAUDE.md` for conventions each milestone should already follow.
 
-## Milestone 0 — Live API verification (blocking)
+## Milestone 0 — Live API verification (blocking) — ✅ DONE 2026-09-22
 
 **Why it's first and blocking:** this dev session's network egress proxy
 blocks all `wikimedia.org`/`*.wikipedia.org`/`*.wikidata.org` domains
@@ -30,21 +30,42 @@ long-term answer — decide on a durable fix (org egress allowlist for this
 environment, most likely) before the day this skill needs a fresh, real
 API check rather than a replayed cassette.
 
-**Definition of done:**
-- Run `curiosity-radar/references/verify_live_api.sh` in an unrestricted
-  environment (the requester's own machine, or a future session with
-  egress allowed), covering every item in `references/api-notes.md`'s
-  "Milestone 0 verification checklist" (10 items: ordinary per-article,
-  known-zero-day per-article, redirect-title per-article, aggregate,
-  ambiguous Wikidata search, missing-sitelink QID, single vs. double
-  MediaWiki redirect, closed-month stability check, rate-limit/backoff
-  probe, earliest-date probe).
-- Save every raw response as a `tests/cassettes/` fixture (these become the
-  first real fixtures the rest of the test suite builds on).
-- Update every `[UNVERIFIED-LIVE]` tag in `references/api-notes.md` to
-  `[CONFIRMED <date>]` (or correct the entry if reality differs from the
-  documented assumption — e.g. zero-fill behavior, redirect hop count,
-  actual history start date, real rate-limit thresholds).
+**Definition of done — met:**
+- ✅ `verify_live_api.sh` run by the requester on their own machine; all 10
+  checklist items executed, output pasted back.
+- ✅ Every raw response saved as a `tests/cassettes/milestone0/` fixture
+  (see that directory's `README.md` for the request/result mapping) — the
+  first real fixtures the rest of the test suite builds on.
+- ✅ `references/api-notes.md` updated from `[UNVERIFIED-LIVE]` to
+  `[CONFIRMED 2026-09-22]` throughout, with entries corrected where reality
+  differed from the original assumption.
+
+**Two findings materially changed the design** (both folded into `SPEC.md`
+already — see its 2026-09-22 update note near the top):
+1. AQS pageviews tracks a redirect title's traffic separately from its
+   canonical target (confirmed with a real redirect: `USA` → `United
+   States`, both showing distinct, nonzero views). `fetch` (Milestone 3)
+   must now sum canonical + one known redirect alias per language, not
+   just fetch the canonical title.
+2. An earlier draft's worked examples hardcoded a Wikidata QID
+   (`Q1631107`) as "intermittent fasting" from memory — it's actually
+   "Bibliography." Every doc now uses an explicit `Q_EXAMPLE` placeholder
+   instead, and this is exactly the kind of mistake `resolve` must never
+   make at runtime (always resolve QIDs live).
+
+**Four items remain genuinely unconfirmed but are non-blocking** (see
+`api-notes.md`'s status table for detail — revisit only if the
+corresponding Milestone-4/9 code behaves unexpectedly against real data):
+true zero-view-day omission (never observed in this batch), double-redirect
+hop resolution, the exact AQS history start date (only "before 2015-07-ish"
+confirmed, not the precise boundary), and the true rate-limit ceiling
+(5 concurrent requests all succeeded; higher concurrency untested).
+
+**Unresolved structural risk, carried forward (see `SPEC.md` §9 item 8):**
+this account's only Claude Code on-the-web environment cannot reach these
+domains at all, so this manual-handoff process will be needed again for
+any future live re-verification — decide on a durable fix (most likely an
+org egress allowlist) before that need arises.
 
 ## Milestone 1 — Project skeleton
 
