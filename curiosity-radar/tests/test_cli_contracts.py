@@ -1,10 +1,12 @@
 """Asserts every command's JSON output against its `schemas.py` model.
 
-Milestone 1 scope: the commands are stubs (see `commands/*.py`), so these
-tests only prove the CLI is wired correctly and the stub outputs are
-already schema-valid — not that the underlying analysis is correct (that
-comes with each later milestone's own tests). A schema change that isn't
-reflected here is exactly the drift this file exists to catch.
+`resolve` is real as of Milestone 2 (see `tests/test_resolve.py` for its
+own behavioral coverage); `fetch`/`analyze`/`chart`/`report`/`verify` are
+still stubs (see `commands/*.py`) pending their own milestones. Either way,
+these tests only prove the CLI is wired correctly and every command's
+output is schema-valid — a schema change that isn't reflected here is
+exactly the drift this file exists to catch. `conftest.py`'s autouse fixture
+keeps every `resolve` call here off the live network.
 """
 
 from __future__ import annotations

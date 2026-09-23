@@ -76,12 +76,30 @@ exists with correct Agent Skills frontmatter; every subcommand in `SPEC.md`
 JSON matching its `schemas.py` model — `uv run curiosity-radar --help` and
 each `<subcommand> --help` work.
 
-## Milestone 2 — Wikidata/MediaWiki `resolve`, cassette-backed
+## Milestone 2 — Wikidata/MediaWiki `resolve`, cassette-backed — ✅ DONE 2026-09-23
 
 **Definition of done:** `resolve` implemented against Milestone 0's
 cassettes covering: happy path (clean single QID, all languages resolve),
 ambiguous entity, a language with no sitelink, and a redirect-chain case.
 Output matches `SPEC.md` §3.1 exactly. Unit tests green for all four cases.
+
+**Met:** `wikimedia/http.py` (shared async client, retry/backoff on
+429/5xx), `wikimedia/wikidata_client.py` (`wbsearchentities`/
+`wbgetentities`), and `wikimedia/mediawiki_client.py` (per-language
+redirect resolution, defensively bounded at `MAX_REDIRECT_HOPS=5` per
+`SPEC.md` §7's `redirect_resolution_failed`) back a fully live `resolve`.
+`tests/test_resolve.py` covers all four required cases plus the
+`no_qid_match`/`redirect_resolution_failed` error paths and an explicit
+`--qid` bypass, reusing Milestone 0's real cassette bytes verbatim where
+the shape fits (ambiguous search, sitelinks-with-gaps, single-redirect) and
+constructing shape-faithful synthetic fixtures only for combinations that
+session didn't happen to produce (a clean unambiguous search, sitelinks
+for this repo's own test languages, a genuine double-hop redirect chain —
+per `api-notes.md` §3, only a single hop was ever confirmed live).
+`tests/conftest.py` adds a project-wide autouse fake-network fixture so
+every other test file's incidental `resolve` calls (bootstrapping a
+project for `analyze`/`chart`/etc.) stay network-free too, per `CLAUDE.md`'s
+testing rules.
 
 ## Milestone 3 — AQS `fetch` + raw cache
 
