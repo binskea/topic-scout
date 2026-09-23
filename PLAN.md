@@ -139,7 +139,7 @@ item). `tests/conftest.py`'s safety net now also fakes AQS endpoints so
 `test_cli_contracts.py`'s incidental `fetch` calls stay off the live
 network too.
 
-## Milestone 4 — Stats core
+## Milestone 4 — Stats core — ✅ DONE 2026-09-23
 
 **Definition of done:** `stats/trend.py` (Theil-Sen + Mann-Kendall),
 `stats/spikes.py` (MAD-based detection), `stats/normalize.py` (aggregate-
@@ -147,6 +147,32 @@ traffic normalization) implemented and unit-tested against synthetic series
 (flat, steadily rising, spiky, all-zero, too-short-for-trend) — no network
 fixture involved. Confidence-label thresholds from `SPEC.md` §5 match the
 code exactly.
+
+**Met:** `stats/trend.py` builds directly on `scipy.stats.theilslopes`/
+`kendalltau` per `CLAUDE.md` (Kendall's tau of day-index vs. views *is*
+the Mann-Kendall statistic); `check_sufficiency` gates the
+all-zero/too-short cases from `SPEC.md` §7 before a trend is ever computed,
+and `compute_trend` accepts an optional explicit x-coordinate array so a
+spike-masked series keeps its slope in true "per calendar day" units
+rather than "per remaining sample." Confidence labels
+(`strong evidence of growth/decline` / `likely growing/declining` /
+`no clear trend detected`) are asserted against SPEC.md §5's exact
+thresholds (`p<0.01 & |tau|>0.3`, `p<0.05`) in
+`tests/test_trend_stats.py::test_confidence_label_thresholds_match_spec_exactly`.
+`stats/spikes.py` implements MAD detection (3.5× threshold, 1.4826 scaling
+constant) plus an `exclude_indices` helper for the "spikes masked" trend
+read. `stats/normalize.py` is a small, pure aggregate-share divide.
+
+One real bug surfaced and was fixed along the way: a *perfectly* constant
+synthetic baseline collapses MAD to exactly 0 (more than half the series
+ties the median), which is an artifact of idealized test data — real daily
+pageviews are essentially never bit-for-bit identical across dozens of
+days — so the fix was to give the test fixtures small realistic jitter
+rather than complicate the detector with an ad hoc epsilon floor.
+
+`tests/test_trend_stats.py`, `tests/test_spikes.py`, and
+`tests/test_normalize.py` cover all required synthetic scenarios; none of
+this milestone touches the network or `cache/`.
 
 ## Milestone 5 — Placebo test
 
