@@ -18,13 +18,16 @@ import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from _cassette import SequentialCassette
 
 from curiosity_radar import project_state
 from curiosity_radar.cache import store
 from curiosity_radar.commands import fetch as fetch_cmd
+from curiosity_radar.errors import CommandError
 from curiosity_radar.schemas import ArticleInfo
+from curiosity_radar.wikimedia import http as http_module
 from curiosity_radar.wikimedia.http import build_client as real_build_client
 
 CASSETTES = Path(__file__).parent / "cassettes" / "milestone0"
@@ -350,3 +353,45 @@ def test_redirect_alias_is_fetched_and_summed_into_the_language_series(
     assert alias_cached[0].views == 290
     # Day 8 onward: the alias response only covered 7 days, so it zero-fills.
     assert alias_cached[7].views == 0
+
+
+def test_persistent_rate_limit_is_a_clean_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """SPEC.md §7's "Rate-limited / 429" row, exercised through `fetch`'s
+    own AQS calls (distinct from resolve's — see `test_resolve.py`'s
+    equivalent for the Wikidata/MediaWiki side)."""
+    _make_project(
+        tmp_path,
+        slug="demo",
+        lang="en",
+        article=ArticleInfo(title="Intermittent_fasting", wiki="en.wikipedia", exists=True),
+        start="2024-08-01",
+        end="2024-08-31",
+    )
+
+    async def _no_sleep(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(http_module.asyncio, "sleep", _no_sleep)
+
+    def _always_429(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "rate limited"})
+
+    monkeypatch.setattr(
+        fetch_cmd,
+        "build_client",
+        lambda transport=None: real_build_client(httpx.MockTransport(_always_429)),
+    )
+
+    with pytest.raises(CommandError) as exc_info:
+        fetch_cmd.run(
+            project="demo",
+            topic=None,
+            languages=None,
+            start=None,
+            end=None,
+            granularity="daily",
+            data_dir=tmp_path,
+        )
+    assert exc_info.value.code == "rate_limited"

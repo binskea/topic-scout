@@ -18,7 +18,7 @@ from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.errors import CommandError
 from curiosity_radar.schemas import ArticleInfo, Candidate, Cluster, ResolveResult
 from curiosity_radar.wikimedia import mediawiki_client, wikidata_client
-from curiosity_radar.wikimedia.http import build_client
+from curiosity_radar.wikimedia.http import RETRY_STATUS_CODES, build_client
 
 
 def run(
@@ -56,6 +56,42 @@ def run(
 
 
 async def _resolve(
+    *,
+    topic: str | None,
+    qid: str | None,
+    languages: list[str],
+    related_qids: list[str],
+    transport: httpx.AsyncBaseTransport | None,
+) -> ResolveResult:
+    """Thin wrapper around `_resolve_impl` that maps network-layer failures
+    onto SPEC.md §7's `network_error`/`rate_limited` contract — kept separate
+    from the actual resolving logic so that logic doesn't need an extra
+    indent level just to sit inside a `try`."""
+    try:
+        return await _resolve_impl(
+            topic=topic,
+            qid=qid,
+            languages=languages,
+            related_qids=related_qids,
+            transport=transport,
+        )
+    except httpx.TransportError as exc:
+        raise CommandError(
+            "network_error",
+            "Could not reach Wikimedia APIs.",
+            "Check network/proxy connectivity and retry.",
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in RETRY_STATUS_CODES:
+            raise CommandError(
+                "rate_limited",
+                "Wikimedia API is rate-limiting this client.",
+                "Wait a minute and retry.",
+            ) from exc
+        raise
+
+
+async def _resolve_impl(
     *,
     topic: str | None,
     qid: str | None,

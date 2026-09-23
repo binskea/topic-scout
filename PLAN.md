@@ -413,7 +413,7 @@ immediately if called at all — a stronger guarantee than counting requests
 of `data_quality.total_days`), so the test proves both "no network" and "a
 coherent, updated answer" rather than just one or the other.
 
-## Milestone 10 — `SKILL.md` finalization + references
+## Milestone 10 — `SKILL.md` finalization + references — ✅ DONE 2026-09-23
 
 **Definition of done:** `SKILL.md` trimmed to a short body (<500 lines)
 covering triggers, the command sequence (`resolve` → `fetch` → `analyze` →
@@ -423,6 +423,57 @@ anything beyond the basics. `references/error-catalog.md`,
 `references/report-template.md` fully written (expanding `SPEC.md` §5–7 into
 skill-facing detail) and cross-checked against the actual implemented
 behavior, not just the original design.
+
+**Met.** `SKILL.md` (112 lines) dropped the "placeholder, trimmed later"
+status note and now leads with when to use the skill, the command
+sequence, the specific `resolve`/`analyze`/`verify` output fields an agent
+must check before proceeding or before handing a report to the user, the
+follow-up flows from `SPEC.md` §2, and pointers into `references/*.md` for
+depth — no restatement of `SPEC.md`'s full architecture.
+
+All four reference docs were written by reading the actual implementation
+(`stats/*.py`, `cache/store.py`, `report/render.py` + both renderers,
+every `CommandError(...)` call site), not by transcribing `SPEC.md`, and
+this surfaced two real, small gaps worth fixing rather than just noting:
+
+1. **`rate_limited` was documented (`SPEC.md` §7) but never actually
+   reachable.** Neither `resolve.py` nor `fetch.py` caught
+   `httpx.HTTPStatusError` — a persistent 429/5xx surviving the shared
+   client's bounded retry fell through to a generic `internal_error` (a
+   real traceback logged for a fully expected, documented failure mode).
+   `resolve.py`'s `_resolve` also had no `network_error` handling at all
+   (only `fetch.py` did), despite being equally network-dependent. Fixed
+   by giving `resolve._resolve` the same `network_error`/`rate_limited`
+   mapping `fetch.py` already had (refactored into a thin
+   `_resolve`-wraps-`_resolve_impl` split so the actual resolving logic
+   didn't need re-indenting into a `try`), and adding the same
+   `httpx.HTTPStatusError` → `rate_limited` mapping to `fetch.py` itself.
+   Covered by two new tests
+   (`test_resolve.py::test_resolve_persistent_rate_limit_is_a_clean_error`,
+   `test_fetch_and_cache.py::test_persistent_rate_limit_is_a_clean_error`)
+   that patch `asyncio.sleep` to a no-op so the retry backoff doesn't slow
+   the suite down, and assert the retry budget was actually exhausted
+   (`calls == MAX_ATTEMPTS`), not just that *some* error came back.
+2. The footer's literal "PASS" stamp turned out to be a **fixed string in
+   both renderers**, never a real prior `verify` result (impossible by
+   construction — `report` always runs before `verify` in the intended
+   sequence) — not a bug, but exactly the kind of thing an agent could
+   misread as "this PDF already passed verification." Documented
+   explicitly in `references/report-template.md` and called out again in
+   `SKILL.md`'s "before handing a report to the user" guidance, rather
+   than left implicit.
+
+`references/stats-methods.md` also documents the still-unmitigated weekly-
+autocorrelation caveat from `SPEC.md` §5 and restates, with the exact
+constant (`MIN_ELIGIBLE_FOR_VERDICT = 10`, always fed an empty pool today),
+why every placebo verdict currently reads "insufficient comparison data" —
+`SKILL.md` tells the agent outright not to present that percentile as a
+real confidence signal yet. `references/caching.md` documents the derived-
+cache hash's exact inputs and re-confirms (rather than re-deriving from
+scratch) Milestone 9's two follow-up flows in cache-key terms.
+
+Full suite (99 tests — 2 new since Milestone 9), `ruff check`, `ruff
+format --check`, and `mypy src/` all clean after this milestone.
 
 ## Milestone 11 — Eval milestone
 

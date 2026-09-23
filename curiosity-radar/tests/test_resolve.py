@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 from _cassette import SequentialCassette
 
@@ -475,6 +476,45 @@ def test_resolve_redirect_loop_exceeding_max_hops_is_a_clean_error(
         )
     cassette.assert_exhausted()
     assert exc_info.value.code == "redirect_resolution_failed"
+
+
+def test_resolve_persistent_rate_limit_is_a_clean_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """SPEC.md §7's "Rate-limited / 429" row: a 429 that never clears after
+    the shared client's bounded retries must surface as `rate_limited`, not
+    a raw exception/`internal_error`."""
+    from curiosity_radar.wikimedia import http as http_module
+
+    async def _no_sleep(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(http_module.asyncio, "sleep", _no_sleep)
+
+    calls = 0
+
+    def _always_429(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, json={"error": "rate limited"})
+
+    monkeypatch.setattr(
+        resolve_cmd,
+        "build_client",
+        lambda transport=None: real_build_client(httpx.MockTransport(_always_429)),
+    )
+
+    with pytest.raises(CommandError) as exc_info:
+        resolve_cmd.run(
+            topic="anything",
+            qid=None,
+            languages=["en"],
+            related_qids=[],
+            save_as=None,
+            data_dir=tmp_path,
+        )
+    assert exc_info.value.code == "rate_limited"
+    assert calls == http_module.MAX_ATTEMPTS  # exhausted the bounded retry budget, not one-shot
 
 
 def test_resolve_explicit_qid_skips_search(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

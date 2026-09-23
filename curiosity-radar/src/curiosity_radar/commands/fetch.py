@@ -26,7 +26,7 @@ from curiosity_radar.errors import CommandError
 from curiosity_radar.project_state import ProjectState
 from curiosity_radar.schemas import CoverageEntry, FetchedSummary, FetchResult
 from curiosity_radar.wikimedia import aqs_client
-from curiosity_radar.wikimedia.http import build_client
+from curiosity_radar.wikimedia.http import RETRY_STATUS_CODES, build_client
 
 # [UNVERIFIED-LIVE] believed ~2015-07-01 (Milestone 0 only confirmed 2010 predates it,
 # not the exact boundary) — used as a safe clamp point, not an exact cutoff.
@@ -246,6 +246,14 @@ async def _fetch(
             "Check network/proxy connectivity; already-cached closed months are still usable "
             "via analyze without a fresh fetch.",
         ) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in RETRY_STATUS_CODES:
+            raise CommandError(
+                "rate_limited",
+                "Wikimedia API is rate-limiting this client.",
+                "Wait a minute and rerun fetch — already-cached months are unaffected.",
+            ) from exc
+        raise
 
     days_freshly_fetched = 0
     for year_month in store.iter_months(effective_start, requested_end):
