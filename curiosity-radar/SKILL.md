@@ -18,14 +18,26 @@ topic is growing (and how much to trust that), or wants a shareable report
 recommending which audiences/languages to investigate next — the kind of
 signal a B2C founder uses to decide what to build or localize next.
 
-**Known gap, always disclose it:** `analyze`'s `placebo` field is real and
-schema-valid, but always reports "insufficient comparison data... found 0"
-today — there's no live basket-sourcing mechanism yet (`SPEC.md` §9 item
-1). Don't present a placebo percentile as a real confidence signal in your
-answer to the user; lean on the Theil-Sen/Mann-Kendall `confidence_label`
-instead, and say so if asked how much to trust a trend.
+**Known gap, always disclose it in the final report/answer:** `analyze`'s
+`placebo` field is real and schema-valid, but always reports "insufficient
+comparison data... found 0" today — there's no live basket-sourcing
+mechanism yet (`SPEC.md` §9 item 1). This affects only the placebo
+percentile, not the rest of the pipeline: don't present a placebo
+percentile as a real confidence signal in your answer to the user, and
+lean on the Theil-Sen/Mann-Kendall `confidence_label` instead when asked
+how much to trust a trend — but this gap is not a reason to skip `chart`,
+`report`, or `verify`. It never invalidates the trend statistics
+themselves, so it never justifies stopping the pipeline early: still run
+every step below and still verify the report before answering.
 
 ## Command sequence
+
+For a new (non-follow-up) request, always run this full sequence,
+`resolve` through `verify`, before answering the user. Do not stop at
+`analyze` even once its `confidence_label` already looks conclusive — a
+verified report, not the raw `analyze` JSON, is the deliverable, and every
+answer must be backed by it (see "Before handing a report to the user"
+below).
 
 ```
 uv run curiosity-radar resolve --topic "<text>" --languages <codes> --save-as <slug>
@@ -61,11 +73,14 @@ language's `data_quality.sufficient_for_trend`. If `false`
 (`"all_zero_or_empty"` or `"too_short"`, under 60 days), don't describe a
 trend for that language at all — say the data's insufficient and why.
 
-**Before handing a report to the user**: always run `verify` and check its
-`status`. `"failed_verification"` is blocking — rerun `report` (never
-hand-edit the PDF) and `verify` again. The report's own footer line is a
-fixed string, not a live check — it does not mean `verify` already passed
-(see `references/report-template.md`).
+**Before handing a report to the user**: every answer to the user's
+question must be backed by a `report` that has passed `verify` — don't
+answer straight from `analyze`'s output alone, even if its
+`confidence_label` seems clear enough on its own. Always run `verify` and
+check its `status`. `"failed_verification"` is blocking — rerun `report`
+(never hand-edit the PDF) and `verify` again. The report's own footer
+line is a fixed string, not a live check — it does not mean `verify`
+already passed (see `references/report-template.md`).
 
 ## Follow-ups without starting cold
 
