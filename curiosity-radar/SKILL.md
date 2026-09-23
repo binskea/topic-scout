@@ -5,9 +5,9 @@ description: Analyzes Wikipedia pageview trends across languages to help B2C fou
 
 # curiosity-radar
 
-**Status: partial (Milestone 2 of `PLAN.md`).** The command chain below is
-wired end to end and returns well-formed JSON. `resolve` is fully
-implemented against live Wikidata/MediaWiki; `fetch`/`analyze`/`chart`/
+**Status: partial (Milestone 3 of `PLAN.md`).** The command chain below is
+wired end to end and returns well-formed JSON. `resolve` and `fetch` are
+fully implemented against live Wikidata/MediaWiki/AQS; `analyze`/`chart`/
 `report`/`verify` are still stubs — see `PLAN.md` for the milestone that
 fills in each one. This file will be trimmed to its final, short (<500
 line) form in Milestone 10; treat it as a placeholder until then.

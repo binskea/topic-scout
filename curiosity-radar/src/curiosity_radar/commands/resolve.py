@@ -49,6 +49,7 @@ def run(
             topic_query=topic,
             qid=result.resolved_qid or "",
             languages=languages,
+            articles=result.cluster.articles if result.cluster else {},
         )
 
     return result

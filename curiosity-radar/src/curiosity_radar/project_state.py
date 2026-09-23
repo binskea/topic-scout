@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from curiosity_radar.schemas import DateRange, ProjectShowResult, StaleFlags, TopicRef
+from curiosity_radar.schemas import ArticleInfo, DateRange, ProjectShowResult, StaleFlags, TopicRef
 
 DEFAULT_LOOKBACK_DAYS = 730
 
@@ -29,6 +29,7 @@ class ProjectState(BaseModel):
     topic_query: str | None = None
     qid: str | None = None
     languages: list[str] = []
+    articles: dict[str, ArticleInfo] = {}
     date_range_start: str
     date_range_end: str
     exclusions: list[ExclusionRange] = []
@@ -89,6 +90,7 @@ def create(
     topic_query: str | None,
     qid: str | None,
     languages: list[str],
+    articles: dict[str, ArticleInfo] | None = None,
     start: str | None = None,
     end: str | None = None,
 ) -> ProjectState:
@@ -98,6 +100,7 @@ def create(
         topic_query=topic_query,
         qid=qid,
         languages=languages,
+        articles=articles or {},
         date_range_start=start or default_start,
         date_range_end=end or default_end,
         created_at=datetime.now(UTC).isoformat(),
@@ -107,14 +110,23 @@ def create(
 
 
 def save_from_resolve(
-    data_dir: Path, slug: str, *, topic_query: str | None, qid: str, languages: list[str]
+    data_dir: Path,
+    slug: str,
+    *,
+    topic_query: str | None,
+    qid: str,
+    languages: list[str],
+    articles: dict[str, ArticleInfo] | None = None,
 ) -> ProjectState:
     existing = load(data_dir, slug)
     if existing is not None:
         existing.topic_query = topic_query
         existing.qid = qid
         existing.languages = languages
+        existing.articles = articles or {}
         existing.analyze_stale = True
         save(data_dir, existing)
         return existing
-    return create(data_dir, slug, topic_query=topic_query, qid=qid, languages=languages)
+    return create(
+        data_dir, slug, topic_query=topic_query, qid=qid, languages=languages, articles=articles
+    )

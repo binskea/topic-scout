@@ -101,7 +101,7 @@ every other test file's incidental `resolve` calls (bootstrapping a
 project for `analyze`/`chart`/etc.) stay network-free too, per `CLAUDE.md`'s
 testing rules.
 
-## Milestone 3 — AQS `fetch` + raw cache
+## Milestone 3 — AQS `fetch` + raw cache — ✅ DONE 2026-09-23
 
 **Definition of done:** `fetch` implemented against cassettes: closed-month
 files are read from cache without a network call; the current/open month
@@ -109,6 +109,35 @@ is always refetched; missing days are zero-filled per the confirmed (post-
 Milestone-0) behavior; the project-aggregate series is fetched and cached
 alongside per-article data. A test explicitly asserts "second `fetch` call
 for an already-closed range makes zero HTTP requests."
+
+**Met:** `cache/store.py` implements the raw cache exactly per `SPEC.md`
+§4 — keyed by `(wiki, article-title-post-redirect, granularity, calendar
+month)`, **not** by our own saved-project slug, so two saved projects
+referencing the same wiki article transparently share one cached file.
+Closed months are fetched once and cached in full (so a later, differently
+-bounded request for the same month is still a cache hit); the open/
+current month is always refetched into `current.json`. `wikimedia/
+aqs_client.py` adds per-article/aggregate AQS calls, treating a 404
+("no data for this range," confirmed shape from Milestone 0's
+`10_earliest_date_probe_404.json`) as zero-fillable rather than a hard
+failure. `resolve`'s per-language `ArticleInfo` (title + `redirect_from`)
+is now persisted on `ProjectState` so `fetch` knows, without re-resolving,
+which title(s) to pull per language — including fetching and summing a
+redirect alias's traffic into its canonical article's series, per
+Milestone 0's redirect-tracking finding. `fetch` also proactively clamps
+an over-long requested start to `AQS_EARLIEST_DATE` (`[UNVERIFIED-LIVE]`
+exact boundary, per `api-notes.md`) with a warning, surfaced via
+`coverage[...].missing_days`.
+
+`tests/test_fetch_and_cache.py` covers all four required behaviors —
+including the exact "second fetch of an already-closed range makes zero
+HTTP requests" assertion — reusing Milestone 0's real cassette bytes
+(`01_per_article_ordinary.json`, `03_per_article_redirect_title.json`,
+`04_aggregate.json`) for the shapes that fit, and a synthetic gap for the
+zero-fill case (never observed live, per `api-notes.md` §1.1's residual
+item). `tests/conftest.py`'s safety net now also fakes AQS endpoints so
+`test_cli_contracts.py`'s incidental `fetch` calls stay off the live
+network too.
 
 ## Milestone 4 — Stats core
 

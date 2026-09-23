@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
+from curiosity_radar.commands import fetch as fetch_cmd
 from curiosity_radar.commands import resolve as resolve_cmd
 from curiosity_radar.wikimedia import http as http_module
 
@@ -92,6 +93,12 @@ def _generic_fake_handler(request: httpx.Request) -> httpx.Response:
             },
         )
 
+    if "wikimedia.org/api/rest_v1/metrics/pageviews" in url:
+        # No fixture-driven traffic needed for the generic bootstrap path —
+        # an empty items list zero-fills cleanly (test_fetch_and_cache.py
+        # exercises real pageview shapes against Milestone 0's cassettes).
+        return httpx.Response(200, json={"items": []})
+
     raise AssertionError(f"unhandled fake request in test safety net: {url}")
 
 
@@ -105,3 +112,4 @@ def _no_live_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(http_module, "build_client", fake_build_client)
     monkeypatch.setattr(resolve_cmd, "build_client", fake_build_client)
+    monkeypatch.setattr(fetch_cmd, "build_client", fake_build_client)
