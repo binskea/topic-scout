@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -99,7 +100,9 @@ def _derived_path(data_root: Path, slug: str, analysis_hash: str) -> Path:
     return data_root / "cache" / "derived" / str(SCHEMA_VERSION) / slug / f"{analysis_hash}.json"
 
 
-def _resolved_articles(state: ProjectState) -> dict[str, ArticleInfo]:
+def resolved_articles(state: ProjectState) -> dict[str, ArticleInfo]:
+    """Languages with a real, existing resolved article — shared with `chart`
+    (Milestone 7), which needs the same set to know what it can render."""
     return {
         lang: article
         for lang in state.languages
@@ -109,10 +112,14 @@ def _resolved_articles(state: ProjectState) -> dict[str, ArticleInfo]:
     }
 
 
+def analysis_date_range(state: ProjectState) -> tuple[date, date]:
+    return date.fromisoformat(state.date_range_start), date.fromisoformat(state.date_range_end)
+
+
 def _collect_raw_file_hashes(data_root: Path, state: ProjectState) -> list[str]:
     hashes: list[str] = []
     wikis_seen: set[str] = set()
-    for article in _resolved_articles(state).values():
+    for article in resolved_articles(state).values():
         assert article.title is not None
         for slot in (article.title, article.redirect_from):
             if slot is None:
@@ -149,7 +156,7 @@ def _compute_analysis_hash(
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def _excluded_days(state: ProjectState, start: date, end: date) -> set[str]:
+def excluded_days(state: ProjectState, start: date, end: date) -> set[str]:
     excluded: set[str] = set()
     for ex in state.exclusions:
         ex_start = max(date.fromisoformat(ex.start), start)
@@ -179,6 +186,50 @@ def _summed_series(
     return combined
 
 
+@dataclass
+class LanguageSeries:
+    """The per-day series behind one language's `LanguageAnalysis` — never
+    part of `analyze`'s own compact JSON output (SPEC.md §3: "never echoes
+    a raw time-series array"), but `chart` (Milestone 7) needs exactly this
+    to actually draw a line, so it's exposed here rather than duplicated."""
+
+    days: list[str]
+    raw_views: list[int]
+    aggregate_views: list[int]
+    day_offsets: list[int]
+    normalized: list[float]
+
+
+def build_language_series(
+    data_root: Path, article: ArticleInfo, start: date, end: date, excluded: set[str], today: date
+) -> LanguageSeries:
+    raw_by_day = _summed_series(data_root, article, start, end, today)
+    aggregate_by_day = store.read_cached_range(
+        data_root, article.wiki, store.AGGREGATE_SLOT, GRANULARITY, start, end, today
+    )
+
+    days: list[str] = []
+    d = start
+    while d <= end:
+        iso = d.isoformat()
+        if iso not in excluded and iso in raw_by_day:
+            days.append(iso)
+        d += timedelta(days=1)
+
+    raw_views = [raw_by_day[day] for day in days]
+    aggregate_views = [aggregate_by_day.get(day, 0) for day in days]
+    day_offsets = [(date.fromisoformat(day) - start).days for day in days]
+    normalized = normalize.normalize_by_aggregate(raw_views, aggregate_views)
+
+    return LanguageSeries(
+        days=days,
+        raw_views=raw_views,
+        aggregate_views=aggregate_views,
+        day_offsets=day_offsets,
+        normalized=normalized,
+    )
+
+
 def _insufficient_trend() -> TrendResult:
     return TrendResult(
         theil_sen_slope_per_day=0.0,
@@ -196,22 +247,8 @@ def _analyze_language(
     today: date,
     placebo_basket_size: int,  # not yet used — no basket-sourcing mechanism exists yet
 ) -> LanguageAnalysis:
-    raw_by_day = _summed_series(data_root, article, start, end, today)
-    aggregate_by_day = store.read_cached_range(
-        data_root, article.wiki, store.AGGREGATE_SLOT, GRANULARITY, start, end, today
-    )
-
-    days: list[str] = []
-    d = start
-    while d <= end:
-        iso = d.isoformat()
-        if iso not in excluded and iso in raw_by_day:
-            days.append(iso)
-        d += timedelta(days=1)
-
-    raw_views = [raw_by_day[day] for day in days]
-    aggregate_views = [aggregate_by_day.get(day, 0) for day in days]
-    day_offsets = [(date.fromisoformat(day) - start).days for day in days]
+    series = build_language_series(data_root, article, start, end, excluded, today)
+    days, raw_views, day_offsets = series.days, series.raw_views, series.day_offsets
 
     total_days = len(days)
     zero_view_days = sum(1 for v in raw_views if v == 0)
@@ -232,7 +269,7 @@ def _analyze_language(
             ),
         )
 
-    normalized = normalize.normalize_by_aggregate(raw_views, aggregate_views)
+    normalized = series.normalized
     normalized_trend = trend.compute_trend(normalized, x=day_offsets)
 
     detected = spikes.detect_spikes(normalized)
@@ -294,12 +331,11 @@ def _compute_analysis(
     data_root: Path, state: ProjectState, *, compare_languages: bool, placebo_basket_size: int
 ) -> AnalyzeResult:
     today = datetime.now(UTC).date()
-    start = date.fromisoformat(state.date_range_start)
-    end = date.fromisoformat(state.date_range_end)
-    excluded = _excluded_days(state, start, end)
+    start, end = analysis_date_range(state)
+    excluded = excluded_days(state, start, end)
 
     languages: dict[str, LanguageAnalysis] = {}
-    for lang, article in _resolved_articles(state).items():
+    for lang, article in resolved_articles(state).items():
         languages[lang] = _analyze_language(
             data_root, article, start, end, excluded, today, placebo_basket_size
         )

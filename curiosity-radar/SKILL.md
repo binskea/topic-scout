@@ -5,16 +5,18 @@ description: Analyzes Wikipedia pageview trends across languages to help B2C fou
 
 # curiosity-radar
 
-**Status: partial (Milestone 6 of `PLAN.md`).** The command chain below is
-wired end to end and returns well-formed JSON. `resolve`, `fetch`, and
-`analyze` are fully implemented — `analyze` computes real Theil-Sen/Mann-
-Kendall trend, MAD spike detection, and aggregate-traffic normalization
-from cached data (never the network); its `placebo` field is real too, but
-currently always reports "insufficient comparison data" since no live
-basket-sourcing mechanism exists yet (`PLAN.md` Milestone 5/6, `SPEC.md` §9
-item 1 — an open question, not a bug). `chart`/`report`/`verify` are still
-stubs — see `PLAN.md` for the milestone that fills in each one. This file
-will be trimmed to its final, short (<500 line) form in Milestone 10; treat
+**Status: partial (Milestone 7 of `PLAN.md`).** The command chain below is
+wired end to end and returns well-formed JSON. `resolve`, `fetch`,
+`analyze`, and `chart` are fully implemented — `analyze` computes real
+Theil-Sen/Mann-Kendall trend, MAD spike detection, and aggregate-traffic
+normalization from cached data (never the network); its `placebo` field is
+real too, but currently always reports "insufficient comparison data"
+since no live basket-sourcing mechanism exists yet (`PLAN.md` Milestone
+5/6, `SPEC.md` §9 item 1 — an open question, not a bug). `chart` renders
+real trend/spike/cross-language PNGs from `analyze`'s output. `report`/
+`verify` are still stubs — see `PLAN.md` for the milestone that fills in
+each one. This file will be trimmed to its final, short (<500 line) form
+in Milestone 10; treat
 it as a placeholder until then.
 
 ## What this skill will do

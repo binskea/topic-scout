@@ -263,12 +263,45 @@ the derived cache being served on a second call and bypassed by
 worded — one new `cache/derived/2/...` file, the old `cache/derived/1/...`
 file untouched, and the raw cache byte-for-byte unchanged.
 
-## Milestone 7 — Charts
+## Milestone 7 — Charts — ✅ DONE 2026-09-23
 
 **Definition of done:** `chart` renders real PNG files from `analyze`
 output for a cassette-backed project, matching `SPEC.md` §3.4's JSON shape
 (paths + captions). Visually spot-checked once by hand, then covered going
 forward by file-existence/non-trivial-size assertions in tests.
+
+**Met, with one implementation note:** `analyze`'s own compact JSON
+deliberately never includes a raw time-series array (`SPEC.md` §3), but
+`chart` obviously needs the actual per-day points to draw a line — so
+`analyze.py` was refactored to expose `build_language_series` (the exact
+series-construction code `analyze` already used internally) as a small
+shared public function, rather than duplicating that logic in `chart.py`
+or having `chart` recompute any *statistics* (trend/spike detection stay
+exclusively `analyze`'s job; `chart` only cross-references the spike
+*dates* `analyze` already found). `chart` calls `analyze.run(...,
+force_recompute=False)` to get the pre-computed stats — cheap/instant when
+the derived cache is current, never a forced recompute.
+
+Three kinds render, matching `SPEC.md` §3.4's example exactly (`kinds`
+input is hyphenated `cross-language`; the rendered chart's own `kind`
+field is `cross_language_bar`, exactly as the spec example shows): `trend`
+(normalized share over time with spike days marked, one per language with
+enough data for a trend read), `spike` (a small bar chart of each detected
+day's MAD z-score, only for languages that actually have any), and
+`cross_language_bar` (one chart, only when at least two languages were
+compared). `--kinds` with nothing given renders every applicable kind.
+
+matplotlib's `Agg` backend is set explicitly (headless-safe, no display
+needed) per `CLAUDE.md`'s stack choice. Visually spot-checked by hand
+against a synthetic rising-with-spikes series — both the trend line
+(rising baseline, three spikes correctly marked) and the spike bar chart
+(three bars, ascending z-scores) rendered as expected. `tests/test_chart.py`
+covers per-kind rendering/skipping, `--kinds` filtering, real non-trivial
+PNG output (checked via magic bytes + a size floor, not exact pixels —
+exact-pixel assertions would be both fragile and beside the point for a
+data-correctness-focused suite), the unknown-kind and unknown-project error
+paths, and that `chart` never disturbs an already-current derived-cache
+file.
 
 ## Milestone 8 — Report + verify
 
