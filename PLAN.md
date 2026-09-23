@@ -174,13 +174,47 @@ rather than complicate the detector with an ad hoc epsilon floor.
 `tests/test_normalize.py` cover all required synthetic scenarios; none of
 this milestone touches the network or `cache/`.
 
-## Milestone 5 — Placebo test
+## Milestone 5 — Placebo test — ✅ DONE 2026-09-23
 
 **Definition of done:** `stats/placebo.py` implemented: basket selection
 (similar-popularity tier, category-tree exclusion) and percentile-verdict
 computation. Tested against a synthetic "wiki" with a known background-
 drift rate vs. a synthetically trending topic, confirming the verdict
 correctly distinguishes the two.
+
+**Met, and one scope boundary worth flagging explicitly:** `select_basket`
+and `compute_verdict` are the pure statistical core only — `select_basket`
+filters/samples a candidate pool the caller already supplies (each with an
+average-views figure and Wikidata category-QID membership), and
+`compute_verdict` percentile-ranks a topic's slope against a list of
+already-computed basket slopes (via `scipy.stats.percentileofscore`, no
+hand-rolled percentile math). Actually *sourcing* that candidate pool live
+from Wikimedia is **not** built here — `SPEC.md` §9 item 1 leaves the exact
+sourcing mechanism as an open question, and `references/api-notes.md` §1.3
+already notes the AQS "top articles" endpoint isn't wired into v1 for
+exactly this reason. Wiring a live source is `analyze`'s job (Milestone 6)
+or later — this milestone only had to prove the selection/verdict math
+itself is correct against synthetic data, which it now is.
+
+`SPEC.md` §9 item 1 ("is there a principled minimum count below which the
+placebo verdict shouldn't be reported at all") is resolved here: yes, 10
+— `compute_verdict` refuses a percentile below 10 basket members rather
+than fabricating one from too few, returning an explicit
+"insufficient comparison data" verdict instead. Verdict tiers (`>=90th
+percentile` -> "exceeds," `>=50th` -> "stronger than typical," else ->
+"within normal" background drift) aren't spelled out numerically in
+`SPEC.md` §5 the way `trend.py`'s confidence-label thresholds are — only
+one example verdict string is given — so these cutoffs are this
+implementation's own reasonable choice, documented here rather than
+presented as a frozen spec number.
+
+`tests/test_placebo.py` covers basket filtering (popularity tier + category
+exclusion + sampling), the median/percentile math with hand-computed
+expected values, and the two required synthetic-wiki cases side by side: a
+topic slope far above a background-drift basket (verdict: exceeds) vs. a
+topic slope drawn from that same background-drift distribution (verdict:
+does not claim exceedance) — confirming the verdict actually distinguishes
+real trend from wiki-wide noise.
 
 ## Milestone 6 — `analyze` command + derived cache
 

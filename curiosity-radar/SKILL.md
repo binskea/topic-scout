@@ -5,13 +5,13 @@ description: Analyzes Wikipedia pageview trends across languages to help B2C fou
 
 # curiosity-radar
 
-**Status: partial (Milestone 4 of `PLAN.md`).** The command chain below is
+**Status: partial (Milestone 5 of `PLAN.md`).** The command chain below is
 wired end to end and returns well-formed JSON. `resolve` and `fetch` are
 fully implemented against live Wikidata/MediaWiki/AQS; the underlying
-trend/spike/normalization statistics (`src/curiosity_radar/stats/`) are
-implemented and unit-tested but not yet wired into a command — `analyze`/
-`chart`/`report`/`verify` are still stubs — see `PLAN.md` for the milestone
-that fills in each one. This file will be trimmed to its final, short
+trend/spike/normalization/placebo statistics (`src/curiosity_radar/stats/`)
+are implemented and unit-tested but not yet wired into a command —
+`analyze`/`chart`/`report`/`verify` are still stubs — see `PLAN.md` for the
+milestone that fills in each one. This file will be trimmed to its final, short
 (<500 line) form in Milestone 10; treat it as a placeholder until then.
 
 ## What this skill will do
