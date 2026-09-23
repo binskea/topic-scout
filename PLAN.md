@@ -561,7 +561,7 @@ harness's `_call_openrouter` to the Anthropic Messages API instead) to this
 environment, then `uv run python -m evals.run_scenarios` and do the actual
 3-criteria human review `PLAN.md` describes above.
 
-## Milestone 12 — Packaging pass
+## Milestone 12 — Packaging pass — ✅ DONE 2026-09-23
 
 **Definition of done:** a fresh `uv sync` from a clean checkout of
 `curiosity-radar/` alone (no dependence on anything elsewhere in this repo)
@@ -571,3 +571,47 @@ updated to reflect the as-built system where it diverged from this plan.
 Every item in `SPEC.md` §9's Open Questions & Risks list is either resolved
 (with the resolution noted) or explicitly deferred with a stated reason —
 none left silently unaddressed.
+
+**Met.** Verified for real, not assumed: copied `curiosity-radar/` alone to
+an isolated directory outside this repo (no `SPEC.md`/`CLAUDE.md`/`PLAN.md`/
+`TASK.md`, no `.git`), ran `uv sync` from scratch there, then `uv run
+pytest` (125/125 passed) and the full `resolve → fetch → analyze → chart →
+report → verify` chain by hand against one of `evals/cassettes/`'s
+scenarios (`CURIOSITY_RADAR_CASSETTE_DIR` + `CURIOSITY_RADAR_FAKE_TODAY`,
+no other setup) — reached `verify`'s `"status": "verified"` there too. No
+step needed anything outside the copied directory.
+
+**`references/examples.md` — a real gap this pass found and closed, not
+just reconciled on paper:** `SPEC.md` §1's directory layout had promised
+this file since the original planning phase, but no milestone had actually
+written it (Milestone 10's reference-doc pass covered the other four but
+missed it). Since three real, verified, cassette-backed runs of the full
+command chain already existed from Milestone 11's manual smoke-testing (one
+per `TASK.md` scenario, all reaching `verify: "verified"`), this pass wrote
+them up properly as `references/examples.md` — real captured output,
+trimmed for readability, not fabricated or reconstructed from memory.
+
+`SPEC.md` updated: §1's tree now lists `clock.py`, `wikimedia/cassette.py`,
+and `evals/`'s actual structure (Milestone 11 added all of these, not
+originally planned); §9's Open Questions & Risks — all 9 items now
+annotated **Resolved** (with which milestone and how) or **Deferred** (with
+the actual stated reason, not the original speculative one) directly in
+place, original wording kept as historical context. Notably: item 6
+(project-state slug scheme) turned out narrower than originally envisioned
+— slugs are caller-supplied and idempotent-on-reuse, not auto-derived from
+topic+languages as the original note assumed; item 8 (the org egress
+block) is still genuinely unresolved and confirmed *again* independently in
+Milestone 11 (an `OPENROUTER_API_KEY` call would hit the same underlying
+policy) — stated as such, not quietly dropped. `CLAUDE.md`'s "How to run
+things" already picked up the two new `evals.*` entry points when
+Milestone 11 built them.
+
+**Left genuinely open, stated here rather than left implicit:** Milestone
+11's live-model eval run (`PLAN.md`'s own Milestone 11 section already
+flags this) — this packaging pass doesn't depend on it and isn't blocked by
+it, but it's the one item in this whole plan not yet exercised for real.
+
+Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
+clean, confirmed both in-place and from the isolated checkout above. With
+this milestone, every `PLAN.md` milestone is either done or explicitly and
+narrowly blocked (Milestone 11's live run alone) — none silently skipped.

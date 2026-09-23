@@ -58,9 +58,10 @@ curiosity-radar/
 │   │   ├── store.py                  # cache key scheme, read/write, closed-month logic
 │   │   └── paths.py                  # resolves the runtime data dir (see below)
 │   ├── project_state.py              # load/save/mutate the project/session file
+│   ├── clock.py                      # "today" seam — real wall time, or CURIOSITY_RADAR_FAKE_TODAY for evals (Milestone 11)
 │   └── schemas.py                    # pydantic models for every JSON contract in §3
 ├── references/
-│   ├── api-notes.md                  # Wikimedia/Wikidata API contracts (UNVERIFIED-LIVE until Milestone 0)
+│   ├── api-notes.md                  # Wikimedia/Wikidata API contracts (CONFIRMED 2026-09-22, see Milestone 0)
 │   ├── stats-methods.md              # Theil-Sen/MK/MAD/placebo rationale (§5, expanded)
 │   ├── caching.md                    # cache key/versioning/invalidation details (§4, expanded)
 │   ├── report-template.md            # one-page PDF layout spec (§6, expanded)
@@ -76,9 +77,20 @@ curiosity-radar/
 │   ├── test_placebo.py
 │   ├── test_report_and_verify.py
 │   └── test_cli_contracts.py         # asserts JSON shape against schemas.py, catches drift
-└── evals/
-    └── scenarios/                    # the 3 TASK.md example queries as Haiku eval prompts
+└── evals/                            # not part of the shipped skill payload's runtime path — see CLAUDE.md
+    ├── scenarios/                    # the 3 TASK.md example queries as eval prompts + synthetic traffic-shape metadata
+    ├── cassettes/                    # synthetic (not live-recorded) cassette data generated from scenarios/
+    ├── results/                      # transcripts + generated PDFs from an actual eval run, for human review
+    ├── generate_cassettes.py         # builds evals/cassettes/ from evals/scenarios/
+    ├── run_scenarios.py              # the eval harness itself (`uv run python -m evals.run_scenarios`)
+    └── README.md                     # exact invocation, how reproducibility is kept without live Wikimedia calls
 ```
+
+`wikimedia/cassette.py` (under `src/curiosity_radar/wikimedia/`, alongside
+`http.py`) is the lookup-based cassette-playback transport
+`CURIOSITY_RADAR_CASSETTE_DIR` activates — real production code (not a
+test-only helper), since it's what makes `evals/run_scenarios.py`'s
+shelled-out CLI calls hit synthetic data instead of the live network.
 
 ### Runtime writable state
 
@@ -524,41 +536,92 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
 
 ## 9. Open Questions & Risks (for the requester)
 
+**Updated 2026-09-23 (Milestone 12 packaging pass):** every item below is
+now annotated **Resolved** or **Deferred** — none left silently
+unaddressed, per `PLAN.md` Milestone 12's own requirement. Original
+wording kept as historical context; the annotation is what actually
+happened.
+
 1. **Placebo basket size / minimum-eligible threshold.** Default 20–30
    articles, sampled within ~±1 order of magnitude of the topic's own
    average daily views, excluding its Wikidata category tree. Open: is
    there a principled minimum count below which the placebo verdict
    shouldn't be reported at all (e.g. refuse below 10 eligible comparison
    articles for a very niche, low-traffic topic)?
+   **Resolved (Milestone 5):** yes, 10 (`stats/placebo.py`'s
+   `MIN_ELIGIBLE_FOR_VERDICT`) — below that, `compute_verdict` returns an
+   explicit "insufficient comparison data" verdict rather than a noisy
+   percentile. Caveat carried forward, not new: no live basket-*sourcing*
+   mechanism exists yet (Milestone 6's own scope boundary), so this
+   threshold is currently always hit — see `references/stats-methods.md`.
 2. **No Wikidata sitelink for a requested language.** Current design skips
    that language with a warning (graceful degradation). An alternative —
    falling back to a cross-wiki title search without a formal sitelink — is
    weaker (no guarantee of "same topic") and **not** recommended for v1;
    flagged rather than silently attempted.
+   **Resolved (Milestone 2):** implemented exactly as decided here — no
+   fallback search, `exists: false, reason: "no_sitelink"`, downstream
+   commands skip the language with a warning. `references/error-catalog.md`
+   documents this as a "soft failure," not an error.
 3. **AQS true history start date and over-long-range clamping.**
    `[UNVERIFIED-LIVE]` — confirm in Milestone 0, then clamp/warn rather than
    silently return less data than requested.
+   **Deferred — residual, non-blocking (Milestone 0):** the *behavior*
+   (404 on an out-of-range request, clamp-and-warn implemented in
+   `fetch.py` via `AQS_EARLIEST_DATE`) is confirmed and built; only the
+   *exact* boundary date remains unpinned (Milestone 0 confirmed 2010
+   predates it, not precisely where it starts, ~2015-07 believed). Revisit
+   only if `fetch`'s clamping ever looks wrong against real data — pinning
+   it exactly needs a live bisection probe, which needs item 8's fix
+   first.
 4. **Whole-project vs. category-matched normalization denominator.**
    Whole-project aggregate is the simpler, chosen v1 default; a
    category-matched denominator (e.g. only other health articles) would
    better isolate topic-specific trend from category-wide attention shifts
    but requires a fair category-matching method — flagged as a v2
    candidate, not a v1 blocker.
+   **Deferred to v2, as originally scoped (Milestone 6):** `analyze`
+   normalizes against the whole-project aggregate only; no category-matched
+   denominator was built. Reason unchanged from the original note — a fair
+   category-matching method is real design work, not a v1 blocker.
 5. **Cache pruning policy.** Deferred to v2 given how small this data
    actually is; a documented size-cap default should exist so it's not
    silently unbounded forever, but active eviction logic isn't a launch
    requirement.
+   **Deferred to v2, as originally scoped:** no eviction logic exists;
+   `references/caching.md` now documents the size reasoning explicitly
+   (small per-article-month files, tens of MB even at dozens of projects)
+   as the stated reason, rather than leaving it implicit.
 6. **Project-state file format and slug scheme.** JSON chosen (single
    serialization format end-to-end: JSON commands in, JSON state, JSON
    out). Slugs should be deterministic from topic + sorted language codes
    so re-running `resolve --save-as` idempotently updates rather than
    duplicating a project — confirm this scheme reads well for end users
    who might reference a slug directly.
+   **Resolved, narrower than originally envisioned (Milestone 1 +
+   12):** JSON confirmed throughout, as planned. The slug itself is
+   **not** auto-derived from topic + languages in code — `--save-as
+   <slug>` takes a caller-supplied string, and `project_state.
+   save_from_resolve` already updates that exact slug idempotently on
+   reuse (confirmed by `tests/test_cli_contracts.py`), which was the part
+   that actually mattered (no accidental duplicate projects from a
+   re-run). Auto-canonicalizing a slug from topic text was deliberately
+   not built — it adds a real edge case (Unicode normalization, collision
+   handling across near-duplicate topics) for a v1 feature the
+   caller-supplied approach already covers; `SKILL.md` instead tells the
+   agent to pick one stable, descriptive slug per conversation and reuse
+   it, which is simpler and sufficient.
 7. **Non-Latin-script topics.** Recommended supported from day one — the
    Ukrainian TASK.md example requires it, and Wikidata search handles
    Cyrillic natively. The PDF path needs a bundled Cyrillic-capable font
    under `assets/fonts/` if the default WeasyPrint/system font lacks the
    glyphs — a concrete check item for the report milestone, not a v2 nicety.
+   **Resolved (Milestone 8, reconfirmed Milestone 11):** `assets/fonts/
+   DejaVuSans{,-Bold}.ttf` bundled and referenced directly by both
+   renderers. Exercised end-to-end (resolve → ... → verify, real Cyrillic
+   titles) both in `tests/test_report_and_verify.py` and in the
+   Milestone 11 eval's `02_astronomy_uk` scenario
+   (`references/examples.md` §2) — not just unit-tested in isolation.
 8. **Milestone 0 as a hard dependency — and a structural gap, not just this
    session's.** Confirmed (2026-09-22) that this account's *only* available
    Claude Code on-the-web environment (`Default`) blocks all Wikimedia/
@@ -583,6 +646,18 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
    verify_live_api.sh` or similar) rather than a scratch file, so re-running
    it later is a known, repeatable step rather than reconstructed from
    scratch.
+   **Deferred — genuinely not this codebase's to fix (confirmed again in
+   Milestone 11):** still unresolved as of Milestone 12; the Milestone 11
+   dev session hit the identical block reaching for an
+   `OPENROUTER_API_KEY`-backed model call too (a *different* domain, same
+   underlying cause — this environment's egress policy, not a Wikimedia-
+   specific block). Option (b) was taken as the standing approach —
+   `verify_live_api.sh` stayed under version control as planned, and
+   Milestone 11 extended the same "don't depend on live network" posture
+   to eval data (entirely synthetic cassettes, `evals/generate_cassettes.py`,
+   rather than another manual live-handoff). Option (a) — an org/environment
+   egress allowlist — remains a request for whoever administers this
+   account's environments, outside what a coding session can grant itself.
 9. **PDF engine auto-detection edge cases.** `--engine auto`'s
    "importable at runtime" check for WeasyPrint needs to also probe that
    its *system* libraries (not just the Python package) actually load
@@ -591,3 +666,8 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
    fallback logic should catch that render-time failure too, not just a
    missing-import case, and still fall back to fpdf2 rather than surfacing
    a raw error to the agent.
+   **Resolved (Milestone 8):** `report/render.py::render`'s `auto` path
+   wraps an actual `WeasyPrintRenderer().render(...)` call in
+   `try/except Exception`, not an import check — proven with a
+   monkeypatched WeasyPrint that imports cleanly but raises on render
+   (`tests/test_report_and_verify.py`).

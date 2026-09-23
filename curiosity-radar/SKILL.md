@@ -107,6 +107,8 @@ steps are still needed. Full detail: `references/caching.md`.
   claim list, and the footer-isn't-a-live-check caveat.
 - `references/api-notes.md` — the underlying Wikimedia/Wikidata/MediaWiki
   API contracts this design depends on.
+- `references/examples.md` — real worked command sequences and JSON
+  output for all 3 `TASK.md` example queries.
 - `SPEC.md` / `PLAN.md` (repo root, dev docs, not shipped with this skill)
   — the frozen architecture and build history, for anyone modifying the
   skill itself rather than using it.
