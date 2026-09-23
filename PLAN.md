@@ -365,7 +365,7 @@ matched) for both engines; and the required deliberately-broken-template
 case, verified to actually reach `status: "failed_verification"` with the
 tampered value showing up in `mismatches`.
 
-## Milestone 9 — Project state + cheap follow-up flows
+## Milestone 9 — Project state + cheap follow-up flows — ✅ DONE 2026-09-23
 
 **Definition of done:** `project list/show/set/fork` implemented per
 `SPEC.md` §3.7. Tests simulate the two named follow-up flows end to end and
@@ -373,6 +373,45 @@ assert the *network* behavior, not just the output shape: "add Slovak"
 triggers HTTP calls only for the newly-added language (existing languages'
 closed months stay cache hits); "drop 2024" triggers zero HTTP calls
 (pure local recomputation via `analyze` over already-cached raw data).
+
+**Met.** `project list/show/set/fork` (Milestone 1's already-real
+implementation — pure local state mutation, no cache/network involved)
+needed no change; `tests/test_cli_contracts.py` already covered its JSON
+shape. What this milestone actually had to close was the *behavioral* gap
+SPEC.md §2 describes but nothing yet proved: `project set --add-language`
+only appends the language to `ProjectState.languages` and marks
+`fetch_stale`/`analyze_stale` — it deliberately does no resolving itself
+(SPEC.md §3.7: "without touching cache or triggering fetch/analyze"), so a
+freshly-added language has no `ArticleInfo` on file yet. `fetch.py` now
+detects, on every run, which of a project's languages are missing an
+entry in `state.articles` and resolves *exactly those* live (via
+`resolve_cmd._resolve(qid=state.qid, languages=missing_langs, ...)`, reusing
+the already-known QID so no redundant `wbsearchentities` search happens)
+before doing any AQS work — already-resolved languages are untouched by
+this step. Combined with `cache/store.py`'s existing closed-month cache
+hits (Milestone 3), this makes "add Slovak" naturally cheap with no new
+machinery beyond that one resolve-the-gap step.
+
+"Drop 2024" needed no code change at all: `analyze` (Milestone 6) already
+reads exclusively from `cache/raw/` and never imports an HTTP client, so
+`project set --exclude-date-range ...` followed by `analyze` was already
+pure local recomputation — this milestone's job was to prove it, not build
+it.
+
+`tests/test_project_followups.py` covers both flows end to end against the
+real command functions (not just their JSON shape): "add Slovak" via a
+`SequentialCassette` containing *only* Slovak's resolve (`wbgetentities` +
+one MediaWiki `query`) and AQS (per-article + aggregate) calls — any
+attempt to re-resolve or re-fetch the already-cached pl/cs languages would
+either exhaust the cassette early or trip its unexpected-request assertion
+— plus asserting `pl`/`cs` coverage shows zero fresh fill days (cache-only)
+while `sk` comes back fully resolved and fetched. "Drop 2024" monkeypatches
+every network entry point (`wikimedia/http.py`'s shared `build_client`,
+plus `resolve_cmd`'s and `fetch_cmd`'s own references to it) to raise
+immediately if called at all — a stronger guarantee than counting requests
+— then confirms the exclusion actually took effect (excluded days drop out
+of `data_quality.total_days`), so the test proves both "no network" and "a
+coherent, updated answer" rather than just one or the other.
 
 ## Milestone 10 — `SKILL.md` finalization + references
 

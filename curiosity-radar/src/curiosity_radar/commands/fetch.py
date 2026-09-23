@@ -68,6 +68,25 @@ def run(
             languages=languages,
             articles=resolved.cluster.articles if resolved.cluster else {},
         )
+    else:
+        # A language added via `project set --add-language` (SPEC.md §2's "add
+        # Slovak" flow) has no resolved article on file yet — resolve exactly
+        # the newly-added language(s) here, live, before touching AQS, so
+        # already-resolved languages never re-trigger any network call.
+        missing_langs = [lang for lang in state.languages if lang not in state.articles]
+        if missing_langs and state.qid:
+            resolved = asyncio.run(
+                resolve_cmd._resolve(
+                    topic=state.topic_query,
+                    qid=state.qid,
+                    languages=missing_langs,
+                    related_qids=[],
+                    transport=transport,
+                )
+            )
+            if resolved.cluster:
+                state.articles.update(resolved.cluster.articles)
+            project_state.save(data_root, state)
 
     result = asyncio.run(
         _fetch(data_root, state, start=start, end=end, granularity=granularity, transport=transport)
