@@ -395,3 +395,54 @@ def test_persistent_rate_limit_is_a_clean_error(
             data_dir=tmp_path,
         )
     assert exc_info.value.code == "rate_limited"
+
+
+def test_fake_today_env_var_pins_which_month_is_treated_as_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Milestone 11 (evals): `CURIOSITY_RADAR_FAKE_TODAY` must actually
+    drive `fetch`'s closed/open-month decision, independent of real wall
+    time — otherwise cassette data recorded for a fixed "today" would go
+    stale the moment a real eval run happened on a different day."""
+    monkeypatch.setenv("CURIOSITY_RADAR_FAKE_TODAY", "2025-03-20")
+
+    _make_project(
+        tmp_path,
+        slug="demo",
+        lang="en",
+        article=ArticleInfo(title="Fixed_Point", wiki="en.wikipedia", exists=True),
+        start="2025-03-01",
+        end="2025-03-20",
+    )
+
+    # If FAKE_TODAY weren't honored, March 2025 would be treated as closed
+    # (safely in the past at real wall time) and requested in full
+    # (03-01..03-31) instead of as the still-open current month
+    # (03-01..03-20, the pinned "today").
+    cassette = SequentialCassette(
+        [
+            (
+                "/per-article/en.wikipedia/all-access/user/Fixed_Point/daily/20250301/20250320",
+                {"items": []},
+            ),
+            ("/aggregate/en.wikipedia/all-access/user/daily/20250301/20250320", {"items": []}),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+    fetch_cmd.run(
+        project="demo",
+        topic=None,
+        languages=None,
+        start=None,
+        end=None,
+        granularity="daily",
+        data_dir=tmp_path,
+    )
+    cassette.assert_exhausted()
+
+    assert (
+        store.raw_dir(tmp_path, "en.wikipedia", "Fixed_Point", "daily") / "current.json"
+    ).exists()
+    assert not (
+        store.raw_dir(tmp_path, "en.wikipedia", "Fixed_Point", "daily") / "2025-03.json"
+    ).exists()

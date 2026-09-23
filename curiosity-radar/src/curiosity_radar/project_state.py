@@ -14,6 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from curiosity_radar import clock
 from curiosity_radar.schemas import ArticleInfo, DateRange, ProjectShowResult, StaleFlags, TopicRef
 
 DEFAULT_LOOKBACK_DAYS = 730
@@ -78,7 +79,7 @@ def list_slugs(data_dir: Path) -> list[str]:
 
 
 def _default_date_range() -> tuple[str, str]:
-    end = datetime.now(UTC).date()
+    end = clock.today()
     start = end.fromordinal(end.toordinal() - DEFAULT_LOOKBACK_DAYS)
     return start.isoformat(), end.isoformat()
 

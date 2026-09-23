@@ -26,12 +26,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-from datetime import UTC, date, datetime  # noqa: E402
+from datetime import date  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from curiosity_radar import project_state  # noqa: E402
+from curiosity_radar import clock, project_state  # noqa: E402
 from curiosity_radar.cache.paths import ensure_subdir, resolve_data_dir  # noqa: E402
 from curiosity_radar.commands import analyze as analyze_cmd  # noqa: E402
 from curiosity_radar.errors import CommandError  # noqa: E402
@@ -78,7 +78,7 @@ def run(*, project: str, kinds: list[str], data_dir: Path | None) -> ChartResult
     )
 
     charts_dir = ensure_subdir(data_root, "charts", state.slug)
-    today = datetime.now(UTC).date()
+    today = clock.today()
     start, end = analyze_cmd.analysis_date_range(state)
     excluded = analyze_cmd.excluded_days(state, start, end)
     articles = analyze_cmd.resolved_articles(state)

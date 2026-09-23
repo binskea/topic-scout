@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from curiosity_radar import project_state
+from curiosity_radar import clock, project_state
 from curiosity_radar.cache import store
 from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.commands import resolve as resolve_cmd
@@ -124,7 +124,7 @@ async def _fetch(
     granularity: str,
     transport: httpx.AsyncBaseTransport | None,
 ) -> _FetchOutcome:
-    today = datetime.now(UTC).date()
+    today = clock.today()
     requested_start = (
         date.fromisoformat(start) if start else date.fromisoformat(state.date_range_start)
     )

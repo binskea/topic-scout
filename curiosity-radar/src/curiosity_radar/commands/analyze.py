@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from curiosity_radar import project_state
+from curiosity_radar import clock, project_state
 from curiosity_radar.cache import store
 from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.errors import CommandError
@@ -330,7 +330,7 @@ def _rank_languages(languages: dict[str, LanguageAnalysis]) -> list[CrossLanguag
 def _compute_analysis(
     data_root: Path, state: ProjectState, *, compare_languages: bool, placebo_basket_size: int
 ) -> AnalyzeResult:
-    today = datetime.now(UTC).date()
+    today = clock.today()
     start, end = analysis_date_range(state)
     excluded = excluded_days(state, start, end)
 

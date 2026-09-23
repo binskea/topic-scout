@@ -93,7 +93,9 @@ uv run pytest                            # unit + cassette-backed tests
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src/
 uv run curiosity-radar <subcommand> ...  # exercise the CLI directly
-uv run python -m evals.run_scenarios     # run the Haiku eval scenarios (once Milestone 11 exists)
+uv run python -m evals.generate_cassettes  # (re)build synthetic eval cassette data
+uv run python -m evals.run_scenarios     # run the eval scenarios against a real model; needs
+                                          # OPENROUTER_API_KEY — see curiosity-radar/evals/README.md
 ```
 
 ## Working conventions

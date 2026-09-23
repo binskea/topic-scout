@@ -475,7 +475,7 @@ scratch) Milestone 9's two follow-up flows in cache-key terms.
 Full suite (99 tests — 2 new since Milestone 9), `ruff check`, `ruff
 format --check`, and `mypy src/` all clean after this milestone.
 
-## Milestone 11 — Eval milestone
+## Milestone 11 — Eval milestone — 🟡 infrastructure DONE 2026-09-23, blocked on a model key
 
 **Definition of done:** the 3 `TASK.md` example queries run end to end,
 with the skill installed, on Claude Haiku 4.5 (or a cheap/free OpenRouter
@@ -495,6 +495,71 @@ what `SKILL.md` provides, (b) the final report's numeric claims pass
 `verify`, (c) a same-session follow-up tweak (e.g. "also check Slovak," "
 drop the most recent spike") stays cheap (no unnecessary refetching) and
 produces a coherent updated answer.
+
+**Not fully met — stated plainly, not glossed over:** this dev session's
+environment has no `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` configured
+(confirmed by checking the environment directly), so no live model call has
+actually been made yet — there is no real transcript to review, and (c)
+above (a live same-session follow-up) has not been exercised end to end by
+an actual agent. The user chose the OpenRouter-free-model path (over
+Anthropic/Haiku 4.5) when asked; running it for real is a one-command step
+once a key is added (`evals/README.md`) — not a redesign.
+
+**What *is* built and real, all covered by the normal test suite (not
+just claimed):**
+- `evals/scenarios/` — the 3 `TASK.md` queries verbatim (original
+  Ukrainian, exercising Cyrillic handling per `SPEC.md` §9 item 7; the
+  third concretized with explicit es/de/ja editions, since `TASK.md`'s own
+  third example is deliberately abstract about which ones), each with
+  fixed topic/QID/per-language traffic-shape metadata.
+- `wikimedia/cassette.py` — a **lookup-based** (not sequential) mock
+  transport, since a live model doesn't call things in a knowable fixed
+  order the way a unit test does. `wbsearchentities`'s `search` param is
+  deliberately wildcarded (the one query param that varies with the
+  model's own paraphrase of the topic, not something a fixture can pin
+  word for word); every other endpoint's params are matched exactly.
+- `clock.py` — a `CURIOSITY_RADAR_FAKE_TODAY` seam, wired into every call
+  site that decides closed-vs-open-month or the default 730-day lookback
+  (`fetch.py`, `analyze.py`, `chart.py`, `project_state.py`'s default date
+  range). Without this, cassette data generated for one fixed "today"
+  would silently go stale (wrong months requested) the moment a real eval
+  ran on a different calendar day than the data was built for — this was
+  found and fixed *while building this milestone*, not assumed away.
+- `evals/generate_cassettes.py` — builds each scenario's manifest using
+  the exact same request-shaping logic the real client code uses (`cache/
+  store.py`'s month-closedness split, `aqs_client.py`'s URL encoding), so
+  a manifest miss during a real run means the model deviated from the
+  expected call shape, not a fixture bug.
+- `evals/run_scenarios.py` — the harness: `SKILL.md` verbatim as the
+  system prompt, two tools (`run_command`, argv-validated against real
+  `shlex` parsing with `shell=False` — not a shell-string prefix check,
+  which would let something like `uv run curiosity-radar --help && rm -rf
+  /` slip through under `shell=True`; and `read_reference`, path-traversal-
+  guarded to `references/*.md`/`SKILL.md` only), full transcript + PDF
+  capture under `evals/results/<slug>/`.
+- **Verified by hand, end to end, all three scenarios, every command in
+  the chain** (`resolve` → `fetch` → `analyze` → `chart` → `report` →
+  `verify`, driven directly rather than through a model, precisely to
+  isolate "does the cassette/clock plumbing work" from "does a live model
+  behave well") — every scenario reaches `verify`'s `"status": "verified"`
+  with 0 mismatches, and the synthetic trend shapes land where intended
+  (pl: strong growth + a detected spike; cs: roughly flat; uk: moderate
+  real growth; es: strong growth; de: flat; ja: moderate growth — a real
+  three-way ranking, not a coin flip). This exact non-agent smoke test is
+  now `tests/test_eval_scenarios.py`, so it runs on every normal `uv run
+  pytest`, not just once by hand.
+- `tests/test_cassette_playback.py`, `tests/test_clock.py`, `tests/
+  test_eval_harness_helpers.py` cover the new transport, the clock seam,
+  and the harness's two tool guards directly (including a real proof that
+  a shell-metacharacter injection attempt — `&&`, tested against a marker
+  file — cannot chain a second command).
+
+Full suite: 125 tests (26 new since Milestone 10), `ruff check`, `ruff
+format --check`, `mypy src/` all clean. **Next step, not this session's to
+take:** add an `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY` and adapt the
+harness's `_call_openrouter` to the Anthropic Messages API instead) to this
+environment, then `uv run python -m evals.run_scenarios` and do the actual
+3-criteria human review `PLAN.md` describes above.
 
 ## Milestone 12 — Packaging pass
 

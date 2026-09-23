@@ -46,3 +46,10 @@ ignore = ["B008"]
 python_version = "3.12"
 files = ["src/curiosity_radar"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+# Lets tests import the top-level `evals` package (Milestone 11) the same
+# way `uv run python -m evals.run_scenarios` does — without this, only
+# `tests/`'s own directory is importable (pytest's default rootless
+# insertion), not its `evals/` sibling.
+pythonpath = ["."]

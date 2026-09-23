@@ -11,8 +11,10 @@ in unit tests or CI).
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 from collections.abc import Mapping
+from pathlib import Path
 
 import httpx
 
@@ -23,8 +25,19 @@ DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 MAX_ATTEMPTS = 3
 RETRY_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
+# Milestone 11 (evals): when set and no explicit transport was passed,
+# every request is answered from a recorded cassette directory instead of
+# the live network — see `wikimedia/cassette.py`.
+CASSETTE_DIR_ENV = "CURIOSITY_RADAR_CASSETTE_DIR"
+
 
 def build_client(transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
+    if transport is None:
+        cassette_dir = os.environ.get(CASSETTE_DIR_ENV)
+        if cassette_dir:
+            from curiosity_radar.wikimedia import cassette
+
+            transport = cassette.build_transport(Path(cassette_dir))
     return httpx.AsyncClient(
         headers={"User-Agent": USER_AGENT},
         timeout=DEFAULT_TIMEOUT,
