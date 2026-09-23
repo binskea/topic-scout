@@ -31,7 +31,7 @@ from curiosity_radar.wikimedia.http import build_client
 # [UNVERIFIED-LIVE] believed ~2015-07-01 (Milestone 0 only confirmed 2010 predates it,
 # not the exact boundary) — used as a safe clamp point, not an exact cutoff.
 AQS_EARLIEST_DATE = date(2015, 7, 1)
-AGGREGATE_SLOT = "_aggregate"
+AGGREGATE_SLOT = store.AGGREGATE_SLOT
 
 
 def run(

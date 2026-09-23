@@ -216,13 +216,52 @@ topic slope drawn from that same background-drift distribution (verdict:
 does not claim exceedance) — confirming the verdict actually distinguishes
 real trend from wiki-wide noise.
 
-## Milestone 6 — `analyze` command + derived cache
+## Milestone 6 — `analyze` command + derived cache — ✅ DONE 2026-09-23
 
 **Definition of done:** Milestones 4–5 wired together behind `analyze`,
 producing the exact compact per-language JSON from `SPEC.md` §3.3. Derived-
 cache versioning verified directly: bumping the stats `schema-version`
 constant triggers recomputation without triggering any raw refetch (assert
 zero HTTP calls, one new `cache/derived/` file).
+
+**Met:** `analyze` reads exclusively from `cache/raw/` (via `cache/store.py`'s
+new `read_cached_range`, a read-only counterpart to `ensure_series` that
+tries both the closed-month file and `current.json` per month, since a
+month can close between one `fetch` and the next `analyze` without a fresh
+`fetch` re-running to "promote" its file). It sums a redirect alias into
+its canonical article's series, drops excluded date ranges (`project set
+--exclude-date-range`) before computing anything, normalizes by the
+project-aggregate series, and runs Theil-Sen/Mann-Kendall with and without
+MAD-flagged spikes masked (keeping real day-offsets as the trend's
+x-coordinate throughout, so slopes stay in true per-calendar-day units
+across both exclusions and spike-masking). The derived-cache key hashes
+`(project slug, every raw cache file's own content hash, exclusions, date
+range, placebo basket size, `SCHEMA_VERSION`)`, so it's invalidated exactly
+when SPEC.md §4 says it should be — never by an unrelated fetch elsewhere.
+
+**Placebo, and the one deliberate scope gap worth restating:** `analyze`
+calls `stats.placebo.compute_verdict` with an **empty** candidate pool,
+since no live basket-sourcing mechanism exists (Milestone 5's own scope
+boundary; `SPEC.md` §9 item 1 is still an open question for the requester,
+not resolved by improvising an unvetted sourcing pipeline here). This
+yields a real, schema-valid `Placebo` object whose verdict honestly reads
+"insufficient comparison data... found 0" — never a fabricated percentile,
+and never a bare `null` either (which would look like a missing field
+rather than a deliberate state). `cross_language_ranking` is therefore
+ranked on trend strength alone for now; the placebo verdict will factor in
+automatically the moment a real basket source is wired up, with no other
+code change needed.
+
+`tests/test_analyze.py` covers: real trend/spike/normalize computation
+against directly-written `cache/raw/` fixtures (no HTTP layer involved at
+all, since `analyze` has no transport dependency to mock in the first
+place); the `all_zero_or_empty`/`too_short` insufficient-data paths;
+date-range exclusions actually shrinking the analyzed series; cross-
+language ranking order; `--compare-languages false` skipping the ranking;
+the derived cache being served on a second call and bypassed by
+`--force-recompute`; and the schema-version-bump requirement precisely as
+worded — one new `cache/derived/2/...` file, the old `cache/derived/1/...`
+file untouched, and the raw cache byte-for-byte unchanged.
 
 ## Milestone 7 — Charts
 

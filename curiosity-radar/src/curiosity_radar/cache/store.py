@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 GRACE_PERIOD_DAYS = 2  # [UNVERIFIED-LIVE] placeholder for AQS's exact data-settling lag
+AGGREGATE_SLOT = "_aggregate"
 
 
 @dataclass
@@ -153,3 +154,37 @@ async def ensure_series(
         all_days.extend(d for d in cached if sub_start.isoformat() <= d.date <= sub_end.isoformat())
 
     return all_days, requests_made, fresh_months
+
+
+def read_cached_range(
+    data_dir: Path,
+    wiki: str,
+    article_slot: str,
+    granularity: str,
+    start: date,
+    end: date,
+    today: date,
+) -> dict[str, int]:
+    """Read-only counterpart to `ensure_series`, used by `analyze` (SPEC.md:
+    "reads exclusively from cache/raw/" — never fetches). A month with no
+    cached file at all (never fetched) is simply absent from the result,
+    not zero-filled — that's different from a fetched month's internal
+    zero-fill for AQS-omitted days.
+
+    Tries both the closed-month filename and `current.json` for each month,
+    since a month can close between one `fetch` and the next `analyze`
+    without a fresh `fetch` re-running to "promote" its file.
+    """
+    directory = raw_dir(data_dir, wiki, article_slot, granularity)
+    result: dict[str, int] = {}
+    for year_month in iter_months(start, end):
+        closed = is_closed_month(year_month, today=today)
+        cached = load_cached_month(directory, year_month, closed=closed)
+        if cached is None:
+            cached = load_cached_month(directory, year_month, closed=not closed)
+        if cached is None:
+            continue
+        for point in cached:
+            if start.isoformat() <= point.date <= end.isoformat():
+                result[point.date] = point.views
+    return result
