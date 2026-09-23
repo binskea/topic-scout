@@ -1,15 +1,13 @@
 """Asserts every command's JSON output against its `schemas.py` model.
 
-`resolve` (Milestone 2), `fetch` (Milestone 3), `analyze` (Milestone 6),
-and `chart` (Milestone 7) are real now — see `tests/test_resolve.py`/
-`test_fetch_and_cache.py`/`test_analyze.py`/`test_chart.py` for their own
-behavioral coverage; `report`/`verify` are still stubs (see
-`commands/*.py`) pending their own milestones. Either way, these tests only
-prove the CLI is wired correctly and every command's output is schema-valid
-— a schema change that isn't reflected here is exactly the drift this file
-exists to catch. `conftest.py`'s autouse fixture keeps every `resolve`/
-`fetch` call here off the live network (`analyze`/`chart` never touch the
-network at all).
+Every command is real now (Milestones 2-8) — see `tests/test_resolve.py`/
+`test_fetch_and_cache.py`/`test_analyze.py`/`test_chart.py`/
+`test_report_and_verify.py` for their own behavioral coverage. These tests
+only prove the CLI is wired correctly and every command's output is
+schema-valid — a schema change that isn't reflected here is exactly the
+drift this file exists to catch. `conftest.py`'s autouse fixture keeps
+every `resolve`/`fetch` call here off the live network (`analyze`/`chart`/
+`report`/`verify` never touch the network at all).
 """
 
 from __future__ import annotations
@@ -134,9 +132,17 @@ def test_report_help() -> None:
 
 def test_verify_returns_schema_valid_json(tmp_path: Path) -> None:
     invoke(tmp_path, "resolve", "--topic", "astronomy", "--languages", "uk", "--save-as", "demo")
+    invoke(tmp_path, "report", "--project", "demo")
     code, payload = invoke(tmp_path, "verify", "--project", "demo")
     assert code == 0
     VerifyResult.model_validate(payload)
+
+
+def test_verify_without_a_prior_report_is_a_clean_error(tmp_path: Path) -> None:
+    invoke(tmp_path, "resolve", "--topic", "astronomy", "--languages", "uk", "--save-as", "demo")
+    code, payload = invoke(tmp_path, "verify", "--project", "demo")
+    assert code == 1
+    ErrorResponse.model_validate(payload)
 
 
 def test_verify_help() -> None:

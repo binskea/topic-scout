@@ -30,7 +30,13 @@ in this codebase day to day.
   **fpdf2** (pure-Python, zero system deps) when WeasyPrint's native
   libraries aren't usable at runtime. Both are real implementations, both
   tested. Never assume WeasyPrint is available; the fallback path is not
-  optional scaffolding.
+  optional scaffolding. A Unicode font (`DejaVuSans.ttf`/`-Bold.ttf`) is
+  bundled under `assets/fonts/` and referenced directly by both renderers
+  (never a bare font-family name the runtime may or may not have) — fpdf2's
+  core Helvetica/Courier fonts are Latin-1 only and raise on anything
+  outside that range, including a plain em dash, not just non-Latin
+  scripts. **PDF text extraction** (for `verify`, Milestone 8): `pypdf` —
+  pure-Python, no system deps, same reproducibility rationale as fpdf2.
 - **CLI**: `typer` (or plain `argparse` if it turns out simpler in
   practice) for subcommand dispatch and `--help` text.
 - **Schema validation**: `pydantic` models in `src/curiosity_radar/

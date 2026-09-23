@@ -303,7 +303,7 @@ data-correctness-focused suite), the unknown-kind and unknown-project error
 paths, and that `chart` never disturbs an already-current derived-cache
 file.
 
-## Milestone 8 — Report + verify
+## Milestone 8 — Report + verify — ✅ DONE 2026-09-23
 
 **Definition of done:** `report` renders the one-page PDF via the pluggable
 renderer (`--engine auto` picks WeasyPrint when its native libraries import
@@ -314,6 +314,56 @@ from the same derived JSON + chart paths, not just one working path.
 (a number in the template made to disagree with the derived JSON) —
 `verify` must return `status: "failed_verification"` with a populated
 `mismatches` list on that case, not just pass on the happy path.
+
+**Met.** `report/render.py` is the single source of truth both renderers
+draw from: `build_claims(context)` turns the current `analyze` result into
+an ordered list of `(label, value)` pairs, and both `fpdf2_renderer.py` and
+`weasyprint_renderer.py` print `label: value` verbatim — so the two engines
+can never drift on what "the numbers" are, and `verify` can rebuild the
+exact same list from a fresh (cache-served, non-network) `analyze`/`chart`
+call and regex-search the PDF's extracted text for each label, comparing
+whatever value follows it. `report`/`verify` share this one code path
+rather than each having their own idea of what a "claim" is.
+
+`--engine auto` tries WeasyPrint's actual `render()` call inside a
+`try/except`, not just an import check, so a Cairo/Pango-level failure at
+render time (SPEC.md §9 item 9's exact concern) falls back to fpdf2 too —
+proven with a monkeypatched WeasyPrint that imports fine but raises on
+render. `--engine weasyprint`/`fpdf2` force that engine with no silent
+fallback, so a real failure surfaces instead of being swallowed.
+
+**One real bug found and fixed along the way, directly relevant to SPEC.md
+§9 item 7:** the first fpdf2 render crashed on a plain em dash — fpdf2's
+core "Helvetica"/"Courier" fonts are Latin-1 only, so *anything* outside
+that range (not just Cyrillic/CJK) raises. Fixed by bundling
+`DejaVuSans.ttf`/`-Bold.ttf` under `assets/fonts/` (exactly where SPEC.md's
+own directory layout already reserved a slot for "a bundled Cyrillic-
+capable font") and having both renderers reference those files directly —
+fpdf2 via `add_font()`, WeasyPrint via an `@font-face` pointing at a
+`file://` URL — rather than trusting the runtime to have a matching font
+family installed under either engine. Also added `pypdf` (pure-Python, no
+system deps, same reproducibility rationale as fpdf2 — see `CLAUDE.md`) for
+`verify`'s PDF text extraction, since nothing already in the stack could
+read a PDF back.
+
+Also discovered and fixed: an early draft of `build_claims` included the
+report's own generation timestamp as a "claim." Since that timestamp is
+re-stamped fresh on every `build_context` call — including `verify`'s —
+it can never match between when `report` ran and when `verify` re-checks
+it, and isn't derived from `analyze`'s JSON at all. It's still shown in the
+header as informational context, just not machine-verified.
+
+Visually spot-checked by hand (both engines, single-language and two-
+language layouts, plus the Cyrillic case that surfaced the font bug) —
+correct one-page layout, embedded charts, cross-language ranking section,
+and footer stamp all render as designed. `tests/test_report_and_verify.py`
+covers: exactly one page for both engines on the same data; `auto`
+preferring WeasyPrint when it actually renders and falling back to fpdf2
+when it doesn't; explicit-engine requests never silently falling back; the
+Cyrillic case for both engines; `verify`'s happy path (claims checked ==
+matched) for both engines; and the required deliberately-broken-template
+case, verified to actually reach `status: "failed_verification"` with the
+tampered value showing up in `mismatches`.
 
 ## Milestone 9 — Project state + cheap follow-up flows
 

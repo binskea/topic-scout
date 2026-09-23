@@ -5,18 +5,20 @@ description: Analyzes Wikipedia pageview trends across languages to help B2C fou
 
 # curiosity-radar
 
-**Status: partial (Milestone 7 of `PLAN.md`).** The command chain below is
-wired end to end and returns well-formed JSON. `resolve`, `fetch`,
-`analyze`, and `chart` are fully implemented — `analyze` computes real
-Theil-Sen/Mann-Kendall trend, MAD spike detection, and aggregate-traffic
-normalization from cached data (never the network); its `placebo` field is
-real too, but currently always reports "insufficient comparison data"
-since no live basket-sourcing mechanism exists yet (`PLAN.md` Milestone
-5/6, `SPEC.md` §9 item 1 — an open question, not a bug). `chart` renders
-real trend/spike/cross-language PNGs from `analyze`'s output. `report`/
-`verify` are still stubs — see `PLAN.md` for the milestone that fills in
-each one. This file will be trimmed to its final, short (<500 line) form
-in Milestone 10; treat
+**Status: all commands implemented (Milestone 8 of `PLAN.md`).** The full
+command chain — `resolve` → `fetch` → `analyze` → `chart` → `report` →
+`verify` — is real end to end. `analyze` computes real Theil-Sen/Mann-
+Kendall trend, MAD spike detection, and aggregate-traffic normalization
+from cached data (never the network); its `placebo` field is real too, but
+currently always reports "insufficient comparison data" since no live
+basket-sourcing mechanism exists yet (`PLAN.md` Milestone 5/6, `SPEC.md` §9
+item 1 — an open question, not a bug). `chart` renders real trend/spike/
+cross-language PNGs from `analyze`'s output. `report` renders a real one-
+page PDF (WeasyPrint, falling back to fpdf2) whose every number is
+`verify`-checkable against the derived stats. Remaining milestones
+(`PLAN.md` 9–12) add cheap follow-up flows, finalize this file, add an eval
+pass, and do a packaging cleanup — they don't add new commands. This file
+will be trimmed to its final, short (<500 line) form in Milestone 10; treat
 it as a placeholder until then.
 
 ## What this skill will do
