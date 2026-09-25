@@ -96,6 +96,8 @@ uv run curiosity-radar <subcommand> ...  # exercise the CLI directly
 uv run python -m evals.generate_cassettes  # (re)build synthetic eval cassette data
 uv run python -m evals.run_scenarios     # run the eval scenarios against a real model; needs
                                           # OPENROUTER_API_KEY — see curiosity-radar/evals/README.md
+uv run python -m evals.run_followup      # continue a scenario with a same-session follow-up turn
+                                          # (Milestone 11 criterion 3); needs a base run first
 ```
 
 ## Working conventions

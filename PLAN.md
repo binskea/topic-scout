@@ -475,7 +475,7 @@ scratch) Milestone 9's two follow-up flows in cache-key terms.
 Full suite (99 tests — 2 new since Milestone 9), `ruff check`, `ruff
 format --check`, and `mypy src/` all clean after this milestone.
 
-## Milestone 11 — Eval milestone — 🟡 infrastructure DONE 2026-09-23, blocked on a model key
+## Milestone 11 — Eval milestone — ✅ DONE 2026-09-25 (live run completed)
 
 **Definition of done:** the 3 `TASK.md` example queries run end to end,
 with the skill installed, on Claude Haiku 4.5 (or a cheap/free OpenRouter
@@ -496,12 +496,64 @@ what `SKILL.md` provides, (b) the final report's numeric claims pass
 drop the most recent spike") stays cheap (no unnecessary refetching) and
 produces a coherent updated answer.
 
-**Not fully met — stated plainly, not glossed over:** this dev session's
-environment has no `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` configured
-(confirmed by checking the environment directly), so no live model call has
-actually been made yet — there is no real transcript to review, and (c)
-above (a live same-session follow-up) has not been exercised end to end by
-an actual agent. The user chose the OpenRouter-free-model path (over
+**Update (2026-09-25) — the live run this section originally deferred has
+now happened, for real, not just claimed:** a later dev session had
+`OPENROUTER_API_KEY` configured. `DEFAULT_MODEL` in `run_scenarios.py`
+(`meta-llama/llama-3.3-70b-instruct:free`) had since been retired from
+OpenRouter's free tier (confirmed via `GET /api/v1/models` — not present);
+several other free models were also rate-limited/overloaded at call time.
+`inclusionai/ling-3.0-flash-sante:free` was confirmed live and
+tool-calling-capable and became the new default (`run_scenarios.py`
+comment records this so a future retirement is diagnosable the same way).
+
+All 3 `TASK.md` scenarios were run end to end against it, full transcripts
+under `evals/results/<slug>/` (`transcript.json` + human-readable
+`transcript.md`), plus a fourth artifact,
+`evals/results/02_astronomy_uk/followup_transcript.json`, from a real
+same-session follow-up turn. Human review against the 3 criteria:
+
+1. **Command sequence, no hand-holding — met, all 3 scenarios.** Each run
+   issued exactly the 6 intended commands (`resolve` → `fetch` → `analyze`
+   → `chart` → `report` → `verify`), nothing extra, no `read_reference`
+   calls needed — `SKILL.md` alone was sufficient.
+2. **`verify` passes — met, all 3 scenarios.** `01_intermittent_fasting_pl_cs`:
+   20/20 claims matched. `02_astronomy_uk`: 11/11. `03_english_learning_es_de_ja`:
+   29/29. Zero mismatches anywhere.
+3. **Same-session follow-up stays cheap and coherent — met, exercised for
+   real.** `run_scenarios.py` only sends the base prompt once, so a new
+   script, `evals/run_followup.py`, was written to reload a scenario's saved
+   `transcript.json` and continue the same conversation/`--data-dir` with a
+   new user turn (see `evals/README.md`'s "Trying a same-session follow-up"
+   section). Run against `02_astronomy_uk`, asking it to exclude the
+   detected spike and re-confirm the trend: the model called
+   `project set --exclude-date-range` (Milestone 9's cheap-mutation path)
+   then re-ran `analyze` → `chart` → `report` → `verify` — **no `fetch`
+   call** — reaching "All verified" again with an updated, coherent
+   before/after comparison (Mann-Kendall p-value tightened from 1.27e-147
+   to 4.52e-147 once the one noisy day was dropped). Not repeated for the
+   other two scenarios since the mechanism being tested
+   (`project set` + re-`analyze`, no `fetch`) is scenario-independent, not
+   scenario-specific behavior.
+
+A real gap surfaced and fixed along the way, not glossed over: OpenRouter
+can return HTTP 200 with an `{"error": {...}}` body (not `"choices"`) when
+a free-tier provider is overloaded — `_call_openrouter` previously died
+with a bare `KeyError: 'choices'` on this. Now raises `RuntimeError` with
+the actual provider message; covered by
+`tests/test_eval_harness_helpers.py::test_call_openrouter_raises_on_an_http_200_provider_error_body`
+(mocked, no live call). Full suite: 126 tests (1 new), `ruff`/`mypy` clean.
+
+SPEC.md §9 item 8 updated: the OpenRouter-egress half of that item is now
+resolved (this session's environment allowed it with no blocking); the
+Wikimedia/Wikidata-egress half stays open and untested, since Milestone 11
+was never meant to depend on it (cassette-backed by design).
+
+**Original note, kept for history:** this dev session's environment has no
+`ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` configured (confirmed by
+checking the environment directly), so no live model call has actually
+been made yet — there is no real transcript to review, and (c) above (a
+live same-session follow-up) has not been exercised end to end by an
+actual agent. The user chose the OpenRouter-free-model path (over
 Anthropic/Haiku 4.5) when asked; running it for real is a one-command step
 once a key is added (`evals/README.md`) — not a redesign.
 
@@ -554,12 +606,10 @@ just claimed):**
   a shell-metacharacter injection attempt — `&&`, tested against a marker
   file — cannot chain a second command).
 
-Full suite: 125 tests (26 new since Milestone 10), `ruff check`, `ruff
-format --check`, `mypy src/` all clean. **Next step, not this session's to
-take:** add an `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY` and adapt the
-harness's `_call_openrouter` to the Anthropic Messages API instead) to this
-environment, then `uv run python -m evals.run_scenarios` and do the actual
-3-criteria human review `PLAN.md` describes above.
+Full suite (at the time): 125 tests (26 new since Milestone 10), `ruff
+check`, `ruff format --check`, `mypy src/` all clean. **Done as of
+2026-09-25** — see the "Update" note above for the completed live run, the
+3-criteria human review, and the one real gap it found and fixed.
 
 ## Milestone 12 — Packaging pass — ✅ DONE 2026-09-23
 
@@ -606,12 +656,16 @@ policy) — stated as such, not quietly dropped. `CLAUDE.md`'s "How to run
 things" already picked up the two new `evals.*` entry points when
 Milestone 11 built them.
 
-**Left genuinely open, stated here rather than left implicit:** Milestone
-11's live-model eval run (`PLAN.md`'s own Milestone 11 section already
-flags this) — this packaging pass doesn't depend on it and isn't blocked by
-it, but it's the one item in this whole plan not yet exercised for real.
+**Left genuinely open at the time, stated here rather than left implicit:**
+Milestone 11's live-model eval run (`PLAN.md`'s own Milestone 11 section
+already flagged this) — this packaging pass didn't depend on it and wasn't
+blocked by it, but it was the one item in this whole plan not yet exercised
+for real. **Closed 2026-09-25:** a later session had `OPENROUTER_API_KEY`
+available, ran all 3 scenarios live plus a real same-session follow-up, and
+Milestone 11's section above now records the completed 3-criteria review.
 
-Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
-clean, confirmed both in-place and from the isolated checkout above. With
-this milestone, every `PLAN.md` milestone is either done or explicitly and
-narrowly blocked (Milestone 11's live run alone) — none silently skipped.
+Full suite (at the time): 125 tests, `ruff check`, `ruff format --check`,
+`mypy src/` all clean, confirmed both in-place and from the isolated
+checkout above (126 tests as of Milestone 11's later live run, one new
+test for a real gap that run surfaced). Every `PLAN.md` milestone is now
+done, none silently skipped.

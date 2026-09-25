@@ -658,6 +658,15 @@ happened.
    rather than another manual live-handoff). Option (a) — an org/environment
    egress allowlist — remains a request for whoever administers this
    account's environments, outside what a coding session can grant itself.
+   **Update (Milestone 11's actual live run, 2026-09-25):** in the cloud
+   session that finally had `OPENROUTER_API_KEY` configured, egress to
+   `openrouter.ai` worked with no blocking — the earlier "same underlying
+   cause" read turned out to be per-environment/per-session, not a durable
+   account-wide OpenRouter block. Wikimedia/Wikidata egress itself was not
+   re-tested (Milestone 11 stays cassette-backed by design regardless), so
+   that half of this item is still genuinely open — but the OpenRouter
+   instance of it is resolved as of this run, and the eval no longer needs
+   deferring on that account.
 9. **PDF engine auto-detection edge cases.** `--engine auto`'s
    "importable at runtime" check for WeasyPrint needs to also probe that
    its *system* libraries (not just the Python package) actually load

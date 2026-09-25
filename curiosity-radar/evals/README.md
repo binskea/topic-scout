@@ -30,10 +30,32 @@ in the session title bar → Edit → API credentials, or as a plain env var)
 and start a new session — never paste a key into chat. `TASK.md` explicitly
 allows a cheap/free OpenRouter model in place of Claude Haiku 4.5 for this
 milestone; the default model (`DEFAULT_MODEL` in `run_scenarios.py`) is a
-free-tier model as of when this was written — OpenRouter's free-tier
-lineup changes over time, so if it 404s, pick a current one from
+free-tier model confirmed live and tool-calling-capable during the actual
+Milestone 11 run recorded under `evals/results/` (2026-09-25) — OpenRouter's
+free-tier lineup churns fast (the model this default previously pointed at
+was already gone by the time of that run), so if it 404s or errors, pick a
+current, tool-calling-capable one from
 [openrouter.ai's free-model listing](https://openrouter.ai/models?max_price=0)
 and pass `--model`.
+
+## Trying a same-session follow-up (criterion 3)
+
+`run_scenarios.py` only runs the base scenario prompt once. To exercise
+criterion 3 for real, after a base run exists for a scenario:
+
+```
+uv run python -m evals.run_followup --scenario 02_astronomy_uk \
+    --prompt "Виключи спайк ... і скажи, чи висновок тримається."
+```
+
+This reloads that scenario's saved `transcript.json`, appends the new user
+message, and continues the tool-calling loop against the *same*
+`--data-dir` (so cached raw pageview data is available) — writing
+`evals/results/<slug>/followup_transcript.json`. A compliant answer should
+not need to call `fetch` again; `project set --exclude-date-range`/
+`--add-language`/`--set-date-range` plus `analyze`/`chart`/`report`/`verify`
+are the cheap path. See `evals/results/02_astronomy_uk/transcript.md` for a
+worked example (spike exclusion, no refetch, updated numbers).
 
 ## What it does
 
