@@ -242,3 +242,17 @@ class ProjectShowResult(StrictModel):
 
 class ProjectListResult(StrictModel):
     projects: list[ProjectShowResult] = []
+
+
+# ---------------------------------------------------------------------------
+# 3.8 bootstrap-script
+# ---------------------------------------------------------------------------
+
+
+class BootstrapScriptResult(StrictModel):
+    project: str
+    script_path: str
+    languages: list[str]
+    articles_covered: int
+    date_range: DateRange
+    instructions: list[str] = []

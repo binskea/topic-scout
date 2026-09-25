@@ -615,3 +615,57 @@ Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
 clean, confirmed both in-place and from the isolated checkout above. With
 this milestone, every `PLAN.md` milestone is either done or explicitly and
 narrowly blocked (Milestone 11's live run alone) — none silently skipped.
+
+## Milestone 13 — `bootstrap-script` escalation path — ✅ DONE 2026-09-25
+
+**Why:** a real end-user request against this session's live environment
+(three genuine, spaced-out resolve/fetch attempts, 90s/150s/240s apart) hit
+Milestone 0's already-documented risk (`SPEC.md` §9 item 8) again, but with
+a new, sharper finding: Wikidata's `429` `retry-after` header *grew* across
+successive real waits (14s, then 37s after a second probe) rather than
+shrinking. That rules out "just wait a fixed amount longer" as a reliable
+strategy — the shared egress IP stays under load regardless of how long
+any one session waits — and turns §9 item 8's option (b) ("accept manual
+paste-back as a standing, documented process") from a nice-to-have into
+something the skill needed to actually implement, not just note.
+
+**Definition of done — met:**
+- ✅ New `bootstrap-script --project <slug>` command
+  (`src/curiosity_radar/commands/bootstrap_script.py`): reads a saved
+  project's already-resolved articles (works even if `fetch` itself never
+  completed — only `resolve` needs to have succeeded), and generates a
+  stdlib-only, zero-dependency Python script that fetches the exact same
+  AQS endpoints from wherever it's run and writes results directly into
+  `cache/store.py`'s own cache layout — one entry per (wiki, title) per
+  language, plus the redirect alias when `resolve` found one, plus each
+  wiki's `_aggregate` slot.
+- ✅ The generated script's fetch/cache logic **duplicates** (never
+  imports) `cache/store.py`'s month-key/closed-month/zero-fill functions
+  and `wikimedia/aqs_client.py`'s URL-building, the same "mirror, not
+  reuse" approach `evals/generate_cassettes.py` already established for
+  the identical reason: it has to run on a machine with no `uv`, no
+  `httpx`, possibly not even this repo cloned.
+- ✅ `BootstrapScriptResult` added to `schemas.py` (§3.8), a new
+  `project_not_resolved` error code added for the case a project exists
+  but never got a real article resolved, both cross-checked by
+  `tests/test_cli_contracts.py`.
+- ✅ `tests/test_bootstrap_script.py` — not just "the script runs": one
+  test executes the generated script's functions against a faked network,
+  copies its `cache/` output into a real data-dir, and asserts a real
+  `fetch --project ...` afterward makes **zero** HTTP requests for the
+  now-cached closed month (`AssertionError` if it tries) while still
+  reading back the correct day count — proving compatibility with
+  `cache/store.py`'s actual schema, not an assumed one. Two more cover the
+  clean-error paths (no project; project with no resolved articles) and
+  one confirms the generated source is syntactically valid Python
+  including the two-entry case (canonical title + redirect alias).
+- ✅ `SKILL.md` and `references/error-catalog.md` (new "Persistent
+  rate-limiting" section) tell the agent exactly when to stop retrying
+  `resolve`/`fetch` and reach for this instead, and what to do in the
+  edge case where `resolve` itself never once succeeded (no project to
+  bootstrap from yet).
+- ✅ `SPEC.md` §3.8 documents the command; §9 item 8 updated in place
+  (not re-litigated) with this milestone's finding and what it changed.
+
+Full suite: 131 tests (6 new), `ruff check`, `ruff format --check`,
+`mypy src/` all clean.

@@ -38,7 +38,8 @@ curiosity-radar/
 │   │   ├── chart.py                  # renders chart image files
 │   │   ├── report.py                 # renders the one-page PDF
 │   │   ├── verify.py                 # checks rendered report numbers vs. computed JSON
-│   │   └── project.py                # list/show/set/fork saved project state
+│   │   ├── project.py                # list/show/set/fork saved project state
+│   │   └── bootstrap_script.py       # generates a local, stdlib-only fetcher for a rate-limited resolve/fetch (§3.8)
 │   ├── wikimedia/
 │   │   ├── wikidata_client.py        # search, sitelinks
 │   │   ├── mediawiki_client.py       # title normalization, redirect resolution
@@ -396,6 +397,50 @@ when languages/date-range widened beyond cached coverage), so `SKILL.md`
 can tell the agent exactly which of `fetch`/`analyze`/`chart`/`report` it
 actually needs to rerun rather than always running the full chain.
 
+### 3.8 `bootstrap-script`
+Generates a self-contained, stdlib-only local pageview fetcher for a saved
+project's already-resolved articles — the concrete answer to §9 item 8's
+"accept manual paste-back as a standing, documented process" option (b),
+built as a real, tested command rather than an ad hoc one-off script.
+`SKILL.md`/`references/error-catalog.md`'s "Persistent rate-limiting"
+section tells the agent when to reach for this: after `resolve`/`fetch`
+keep returning `rate_limited` across a few genuinely spaced-out retries
+(real environment egress issue observed directly on 2026-09-25: a shared
+egress IP's `429` `retry-after` header *grew* across successive waits —
+14s, then 37s — rather than shrinking, so waiting longer made no
+progress).
+
+Inputs: `--project <slug>` (must have at least one language with a
+resolved article on file — `fetch` itself need never have succeeded),
+`--data-dir`.
+
+```json
+{
+  "project": "intermittent-fasting-pl-cs",
+  "script_path": "<data-dir>/scripts/intermittent-fasting-pl-cs_local_fetch.py",
+  "languages": ["pl", "cs"],
+  "articles_covered": 3,
+  "date_range": {"start": "2024-09-25", "end": "2026-09-25"},
+  "instructions": ["Copy the script to a machine with normal internet access...", "..."]
+}
+```
+`articles_covered` counts one entry per (wiki, title) the script fetches —
+a language with a redirect alias (`resolve`'s `redirect_from`) contributes
+two, matching `fetch`'s own canonical + redirect-alias summation. The
+generated script deliberately **duplicates** (never imports)
+`cache/store.py`'s month-key/closed-month/zero-fill logic and
+`wikimedia/aqs_client.py`'s URL-building — the same "mirror, not reuse"
+approach `evals/generate_cassettes.py` already takes, for the same reason:
+it must run with zero project dependencies (stdlib only) on a machine that
+may have neither `uv` nor this repo installed. Its cache output lands in
+`./cache/raw/...` in exactly `cache/store.py`'s own layout/schema
+(`tests/test_bootstrap_script.py` proves this end to end: run the
+generated script's logic against a faked network, copy its `cache/`
+output into a real data-dir, and assert a real `fetch --project ...`
+makes zero HTTP requests for the now-cached closed month), so once the
+user hands back a zipped `cache/` folder and it's merged into
+`<data-dir>/cache/`, `fetch` treats every closed month as already fetched.
+
 ## 4. Caching strategy
 
 **Cache key** for raw pageview data: `(project=<lang>.wikipedia,
@@ -658,6 +703,15 @@ happened.
    rather than another manual live-handoff). Option (a) — an org/environment
    egress allowlist — remains a request for whoever administers this
    account's environments, outside what a coding session can grant itself.
+   **Update (Milestone 13, 2026-09-25):** option (b) is no longer just
+   "manual paste-back is acceptable" — it's now a first-class command,
+   `bootstrap-script` (§3.8), triggered automatically by `SKILL.md`'s
+   escalation policy rather than reconstructed ad hoc each time. Prompted
+   by hitting the identical live block again this session and confirming
+   it's genuinely a *shared-egress* condition, not a one-off: Wikidata's
+   `429` `retry-after` header grew across successive real waits (14s, then
+   37s) rather than shrinking, ruling out "just wait a fixed amount
+   longer" as a reliable fix. Still doesn't touch option (a).
 9. **PDF engine auto-detection edge cases.** `--engine auto`'s
    "importable at runtime" check for WeasyPrint needs to also probe that
    its *system* libraries (not just the Python package) actually load
