@@ -51,9 +51,20 @@ exit code alone.
 `cluster.articles[lang].exists` for every requested language.
 - `ambiguous: true` → don't guess which `candidates` entry is right; ask
   the user to pick, or rerun with an explicit `--qid`.
-- A language with `exists: false` → that language has no article for this
-  topic (no sitelink, or the sitelink's title doesn't resolve). It's
-  silently skipped by every later command — tell the user which
+- A language with `exists: false, reason: "no_sitelink"` → don't stop there
+  and just report the language as unavailable. Check `suggested_qids`
+  first: it's populated exactly when another Wikidata entity from the same
+  topic search covers more of the requested languages than `resolved_qid`
+  does. If it's non-empty, tell the user which QID/label would add which
+  language(s) (`additional_languages`) and offer to rerun `resolve --qid
+  <that QID>` — never switch `resolved_qid` automatically, this is a
+  proposal, exactly like `candidates` during an ambiguous match.
+  `suggested_qids` empty means no better alternative was found among the
+  candidates actually searched; only then tell the user the language was
+  dropped and why.
+- A language with `exists: false` for any other reason (the sitelink's
+  title doesn't resolve) → that language has no article for this topic.
+  It's silently skipped by every later command — tell the user which
   language(s) got dropped and why, don't let it pass unmentioned.
 
 **After `analyze`**, before running `chart`/`report`: check each
@@ -95,8 +106,8 @@ steps are still needed. Full detail: `references/caching.md`.
 
 - `references/error-catalog.md` — every `error.code` this skill can
   return, plus the non-fatal "soft failure" signals (`ambiguous`,
-  `exists: false`, `sufficient_for_trend: false`, a `verify` mismatch) and
-  what `verify` does and doesn't catch.
+  `exists: false`, `suggested_qids`, `sufficient_for_trend: false`, a
+  `verify` mismatch) and what `verify` does and doesn't catch.
 - `references/stats-methods.md` — exact thresholds behind every
   `confidence_label` and the placebo verdict tiers, plus known
   methodological limitations (weekly autocorrelation, the placebo-basket

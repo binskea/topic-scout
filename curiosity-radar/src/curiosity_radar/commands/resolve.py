@@ -4,6 +4,13 @@ Milestone 2: resolves live against Wikidata (`wbsearchentities`/
 `wbgetentities`) and MediaWiki (per-language redirect/title normalization).
 `resolve` never hardcodes a QID (see `references/api-notes.md`'s
 `Q1631107` cautionary tale) — every topic is looked up fresh.
+
+Milestone 13: when the resolved QID has a `no_sitelink` gap in at least one
+requested language, the other topic-search `candidates` (already fetched,
+never a new/weaker cross-wiki search per `SPEC.md` §9 item 2) are checked
+for sitelink coverage too. A candidate covering more of the requested
+languages than `resolved_qid` is surfaced in `suggested_qids` — a proposal,
+never an automatic substitution, same as `ambiguous`/`candidates`.
 """
 
 from __future__ import annotations
@@ -16,7 +23,13 @@ import httpx
 from curiosity_radar import project_state
 from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.errors import CommandError
-from curiosity_radar.schemas import ArticleInfo, Candidate, Cluster, ResolveResult
+from curiosity_radar.schemas import (
+    ArticleInfo,
+    Candidate,
+    Cluster,
+    ResolveResult,
+    SuggestedQid,
+)
 from curiosity_radar.wikimedia import mediawiki_client, wikidata_client
 from curiosity_radar.wikimedia.http import RETRY_STATUS_CODES, build_client
 
@@ -138,12 +151,14 @@ async def _resolve_impl(
         sitelinks = await wikidata_client.get_sitelinks(client, resolved_qid)
 
         articles: dict[str, ArticleInfo] = {}
+        missing_languages: list[str] = []
         for lang in languages:
             wiki = f"{lang}.wikipedia"
             sitelink_title = sitelinks.get(f"{lang}wiki")
             if sitelink_title is None:
                 articles[lang] = ArticleInfo(wiki=wiki, exists=False, reason="no_sitelink")
                 warnings.append(f"{lang}: no Wikidata sitelink for this QID")
+                missing_languages.append(lang)
                 continue
 
             resolved = await mediawiki_client.resolve_title(client, lang, sitelink_title)
@@ -160,6 +175,24 @@ async def _resolve_impl(
                 exists=True,
             )
 
+        suggested_qids: list[SuggestedQid] = []
+        if missing_languages:
+            resolved_coverage = {lang for lang in languages if f"{lang}wiki" in sitelinks}
+            for candidate in candidates:
+                if candidate.qid == resolved_qid:
+                    continue
+                alt_sitelinks = await wikidata_client.get_sitelinks(client, candidate.qid)
+                alt_coverage = {lang for lang in languages if f"{lang}wiki" in alt_sitelinks}
+                if len(alt_coverage) > len(resolved_coverage):
+                    suggested_qids.append(
+                        SuggestedQid(
+                            qid=candidate.qid,
+                            label=candidate.label,
+                            description=candidate.description,
+                            additional_languages=sorted(alt_coverage - resolved_coverage),
+                        )
+                    )
+
         cluster = Cluster(primary_qid=resolved_qid, related_qids=related_qids, articles=articles)
 
         return ResolveResult(
@@ -168,5 +201,6 @@ async def _resolve_impl(
             candidates=candidates,
             ambiguous=ambiguous,
             cluster=cluster,
+            suggested_qids=suggested_qids,
             warnings=warnings,
         )

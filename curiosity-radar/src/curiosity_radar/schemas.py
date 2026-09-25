@@ -45,6 +45,13 @@ class Candidate(StrictModel):
     match_type: Literal["label", "alias"]
 
 
+class SuggestedQid(StrictModel):
+    qid: str
+    label: str
+    description: str | None = None
+    additional_languages: list[str]
+
+
 class ArticleInfo(StrictModel):
     title: str | None = None
     wiki: str
@@ -65,6 +72,7 @@ class ResolveResult(StrictModel):
     candidates: list[Candidate] = []
     ambiguous: bool
     cluster: Cluster | None = None
+    suggested_qids: list[SuggestedQid] = []
     warnings: list[str] = []
 
 

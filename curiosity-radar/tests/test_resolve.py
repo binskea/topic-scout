@@ -281,6 +281,179 @@ def test_resolve_language_with_no_sitelink_is_not_a_hard_failure(
     assert de_article.title == "Literaturverzeichnis"
 
 
+def _search_hit(qid: str, label: str, description: str | None = None) -> dict:
+    return {
+        "id": qid,
+        "title": qid,
+        "pageid": 1,
+        "concepturi": f"http://www.wikidata.org/entity/{qid}",
+        "repository": "wikidata",
+        "url": f"//www.wikidata.org/wiki/{qid}",
+        "display": {"label": {"value": label, "language": "en"}},
+        "label": label,
+        **({"description": description} if description else {}),
+        "match": {"type": "label", "language": "en", "text": label},
+    }
+
+
+def test_resolve_suggests_alternate_qid_covering_missing_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `no_sitelink` gap on `resolved_qid` should surface a `candidates`
+    entry that actually covers the missing language as a `suggested_qids`
+    proposal — never an automatic substitution (SPEC.md §3.1, Milestone 13),
+    prompted by a real "Articulation" resolve where this happened live."""
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "articulation"},
+                {
+                    "searchinfo": {"search": "articulation"},
+                    "search": [
+                        _search_hit("Q101", "articulation", "manner of pronouncing a speech sound"),
+                        _search_hit("Q102", "articulation", "movable joint between two bones"),
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q101"},
+                {
+                    "entities": {
+                        "Q101": {
+                            "type": "item",
+                            "id": "Q101",
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Articulation", "badges": []}
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Articulation"},
+                {
+                    "batchcomplete": "",
+                    "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": "Articulation"}}},
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q102"},
+                {
+                    "entities": {
+                        "Q102": {
+                            "type": "item",
+                            "id": "Q102",
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Joint", "badges": []},
+                                "ukwiki": {"site": "ukwiki", "title": "Суглоб", "badges": []},
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="articulation",
+        qid=None,
+        languages=["en", "uk"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.resolved_qid == "Q101"
+    assert result.cluster is not None
+    assert result.cluster.articles["uk"].exists is False
+    assert result.cluster.articles["uk"].reason == "no_sitelink"
+    assert len(result.suggested_qids) == 1
+    suggestion = result.suggested_qids[0]
+    assert suggestion.qid == "Q102"
+    assert suggestion.label == "articulation"
+    assert suggestion.additional_languages == ["uk"]
+
+
+def test_resolve_no_suggestion_when_no_candidate_covers_more_languages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Other candidates exist, but none covers more of the requested
+    languages than `resolved_qid` — `suggested_qids` must stay empty rather
+    than proposing a QID that wouldn't actually help."""
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "articulation"},
+                {
+                    "searchinfo": {"search": "articulation"},
+                    "search": [
+                        _search_hit("Q101", "articulation", "manner of pronouncing a speech sound"),
+                        _search_hit("Q103", "articulation", "a musical performance technique"),
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q101"},
+                {
+                    "entities": {
+                        "Q101": {
+                            "type": "item",
+                            "id": "Q101",
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Articulation", "badges": []}
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Articulation"},
+                {
+                    "batchcomplete": "",
+                    "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": "Articulation"}}},
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q103"},
+                {
+                    "entities": {
+                        "Q103": {
+                            "type": "item",
+                            "id": "Q103",
+                            "sitelinks": {
+                                "dewiki": {"site": "dewiki", "title": "Artikulation", "badges": []}
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="articulation",
+        qid=None,
+        languages=["en", "uk"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.suggested_qids == []
+
+
 def test_resolve_redirect_chain_including_a_double_hop(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
