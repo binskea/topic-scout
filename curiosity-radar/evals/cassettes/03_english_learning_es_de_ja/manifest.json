@@ -39344,10 +39344,11 @@
       ]
     }
   },
-  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_LEARN_ENGLISH&props=sitelinks": {
+  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_LEARN_ENGLISH&languages=en%7Ces%7Cde%7Cja&props=sitelinks%7Caliases": {
     "body": {
       "entities": {
         "Q_EVAL_LEARN_ENGLISH": {
+          "aliases": {},
           "id": "Q_EVAL_LEARN_ENGLISH",
           "sitelinks": {
             "dewiki": {

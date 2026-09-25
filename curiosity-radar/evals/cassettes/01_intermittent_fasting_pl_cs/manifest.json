@@ -26229,10 +26229,11 @@
       ]
     }
   },
-  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_FASTING&props=sitelinks": {
+  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_FASTING&languages=en%7Cpl%7Ccs&props=sitelinks%7Caliases": {
     "body": {
       "entities": {
         "Q_EVAL_FASTING": {
+          "aliases": {},
           "id": "Q_EVAL_FASTING",
           "sitelinks": {
             "cswiki": {

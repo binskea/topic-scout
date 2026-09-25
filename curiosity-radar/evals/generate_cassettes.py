@@ -147,10 +147,21 @@ def _manifest_for_scenario(scenario: Scenario) -> dict[str, dict]:
         }
     }
 
+    # Same dedup/ordering as `resolve.py`'s own `alias_languages` (`"en"`
+    # first, then each requested language, in the order the scenario's
+    # `--languages` are passed) — the aliases `props`/`languages` params
+    # must match exactly or this cassette entry misses.
+    alias_languages = list(dict.fromkeys(["en", *(p.lang for p in scenario.languages)]))
     entities_key = _key(
         "GET",
         WIKIDATA_API,
-        {"action": "wbgetentities", "ids": scenario.qid, "props": "sitelinks", "format": "json"},
+        {
+            "action": "wbgetentities",
+            "ids": scenario.qid,
+            "props": "sitelinks|aliases",
+            "languages": "|".join(alias_languages),
+            "format": "json",
+        },
     )
     manifest[entities_key] = {
         "body": {
@@ -162,6 +173,12 @@ def _manifest_for_scenario(scenario: Scenario) -> dict[str, dict]:
                         f"{p.lang}wiki": {"site": f"{p.lang}wiki", "title": p.title, "badges": []}
                         for p in scenario.languages
                     },
+                    # No synthetic aliases here — this eval fixture's job is
+                    # exercising the command chain against known trend
+                    # shapes (see module docstring), not the alias-derived
+                    # related_search_terms feature, which has its own
+                    # dedicated cassette-backed tests in test_resolve.py.
+                    "aliases": {},
                 }
             },
             "success": 1,

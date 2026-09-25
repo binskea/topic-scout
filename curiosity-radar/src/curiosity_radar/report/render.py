@@ -51,6 +51,7 @@ class ReportContext:
     languages: list[str]
     truncated: bool
     topic_label: str
+    related_search_terms: list[str]
 
 
 @dataclass
@@ -82,6 +83,7 @@ def build_context(
         languages=languages,
         truncated=len(all_langs) > MAX_LANGUAGES,
         topic_label=state.topic_query or state.slug,
+        related_search_terms=state.related_search_terms,
     )
 
 
@@ -172,6 +174,20 @@ def assumptions_text(context: ReportContext) -> str:
     if redirect_notes:
         text += "Redirect aliases included: " + "; ".join(redirect_notes) + "."
     return text
+
+
+def related_search_terms_text(context: ReportContext) -> str:
+    """Top-10 Wikidata "also known as" phrasings for the resolved topic —
+    same-meaning, differently-worded terms the user could try in a
+    follow-up `resolve --topic`. Sourced from `state.related_search_terms`
+    (computed once by `resolve`, persisted on project state), never
+    generated at render time — deterministic and reproducible like every
+    other report section, just not a numeric/date fact `verify` needs to
+    cross-check (SPEC.md §8: this isn't search-demand data, only alternate
+    phrasings of the same Wikipedia topic)."""
+    if not context.related_search_terms:
+        return "No alternate phrasings found in Wikidata for this topic."
+    return "; ".join(context.related_search_terms)
 
 
 def render(context: ReportContext, out_path: Path, *, engine: str) -> tuple[RenderOutcome, str]:

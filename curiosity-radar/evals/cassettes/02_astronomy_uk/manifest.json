@@ -13114,10 +13114,11 @@
       ]
     }
   },
-  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_ASTRONOMY&props=sitelinks": {
+  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_ASTRONOMY&languages=en%7Cuk&props=sitelinks%7Caliases": {
     "body": {
       "entities": {
         "Q_EVAL_ASTRONOMY": {
+          "aliases": {},
           "id": "Q_EVAL_ASTRONOMY",
           "sitelinks": {
             "ukwiki": {

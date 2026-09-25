@@ -615,3 +615,78 @@ Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
 clean, confirmed both in-place and from the isolated checkout above. With
 this milestone, every `PLAN.md` milestone is either done or explicitly and
 narrowly blocked (Milestone 11's live run alone) — none silently skipped.
+
+## Milestone 13 — Related search terms (post-freeze feature request) — ✅ DONE 2026-09-25
+
+**Why this is a milestone, not a side-fix:** requested after Milestone 12's
+"frozen architecture" pass — treated the same as any other change to
+`SPEC.md`'s design (dated update note, not a silent edit), per this
+project's own established convention (see the 2026-09-22 update note near
+`SPEC.md`'s top).
+
+**The request had two parts, evaluated separately before building
+anything:**
+1. "Add top-10 synonym/alternate-phrasing terms to the report, for the
+   user's next queries." **Feasible** — Wikidata already returns aliases
+   ("also known as" labels) for an entity, and `resolve` already makes a
+   `wbgetentities` call for sitelinks; adding `props=aliases` to that same
+   call needs no new endpoint.
+2. "Can we know the max number of users who searched in a given period?"
+   **Not feasible, and not built** — AQS exposes page-*view* counts
+   (`agent=user` filtered, still not a unique-visitor count), never
+   search-query volume or a unique-searcher count; Wikimedia doesn't
+   publish that data at all. Fabricating it would violate this project's
+   core anti-hallucination premise (every number in the report traces to
+   real derived data, checked by `verify`). `SPEC.md` §8 now states this
+   explicitly rather than leaving it as an inference from the existing
+   "not search demand" line.
+
+**Definition of done:** `resolve` returns `related_search_terms` (§3.1) —
+top 10, deduped, excludes the topic query and any already-resolved
+article/redirect title; persisted on project state; rendered as a new
+"Related search terms" section in the one-page PDF report (§6) by both
+renderers, with a graceful "none found" fallback; page count stays 1.
+Explicitly **not** added to `verify`'s claim list — it's descriptive text
+sourced deterministically from stored state (same category as
+`assumptions_text`), not a numeric/date fact to cross-check.
+
+**Met.** `wikimedia/wikidata_client.py`'s `get_sitelinks_and_aliases`
+replaces `get_sitelinks`, adding `props=aliases&languages=...` to the same
+call (one HTTP round trip, not two) — `[UNVERIFIED-LIVE]` for the
+`aliases` half specifically, per `references/api-notes.md` §2.2, since
+this account's cloud sessions still can't reach live Wikidata (`SPEC.md`
+§9 item 8, unchanged); the shape follows Wikidata's documented Wikibase
+API contract, and a shape-faithful *synthetic* cassette fixture covers it
+in `tests/test_resolve.py`, the same honest treatment Milestone 2 gave
+shapes that session's live pass didn't happen to produce. `resolve.py`'s
+`_extract_related_search_terms` pools aliases across `"en"` plus every
+requested language (in that order, for deterministic output), dedupes
+case-insensitively, and excludes the topic query/resolved titles.
+`project_state.py`'s `ProjectState`/`create`/`save_from_resolve` gained a
+`related_search_terms` field (default `[]`, fully backward compatible with
+existing saved project files). `report/render.py` gained
+`related_search_terms_text` (mirrors `assumptions_text`'s pattern exactly)
+and both renderers gained a matching section between "Cross-language
+ranking" and "Assumptions".
+
+`evals/generate_cassettes.py`'s fixed sitelinks fixture needed its
+`wbgetentities` request key updated to match the new `props`/`languages`
+params (an empty `"aliases": {}` body — this eval fixture's job is
+exercising the command chain against known trend shapes, not this
+feature); all three scenario manifests regenerated
+(`uv run python -m evals.generate_cassettes`).
+
+`tests/test_resolve.py` adds two cases: aliases→`related_search_terms`
+with the dedup/exclusion rules all exercised in one fixture, and the
+cap-at-10 truncation. `tests/test_report_and_verify.py` adds: the section
+renders and keeps the report at one page even with 10 long alias strings,
+its terms are actually found in the extracted PDF text, `verify` still
+passes (confirming this section is correctly *not* wired into `verify`'s
+claim list), and the "no aliases found" fallback text renders correctly.
+
+Full suite: 131 tests (6 new), `ruff check`, `ruff format --check`,
+`mypy src/` all clean. `SPEC.md` (§1's update-note convention, §3.1, §3.5,
+§6, §8), `references/api-notes.md` (§2.2), and `references/
+report-template.md` (section list) updated to match; `SKILL.md` gained a
+one-line pointer so the agent knows to mention `related_search_terms` when
+present.

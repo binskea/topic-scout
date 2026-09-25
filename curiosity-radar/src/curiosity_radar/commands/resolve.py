@@ -20,6 +20,8 @@ from curiosity_radar.schemas import ArticleInfo, Candidate, Cluster, ResolveResu
 from curiosity_radar.wikimedia import mediawiki_client, wikidata_client
 from curiosity_radar.wikimedia.http import RETRY_STATUS_CODES, build_client
 
+MAX_RELATED_SEARCH_TERMS = 10
+
 
 def run(
     *,
@@ -50,6 +52,7 @@ def run(
             qid=result.resolved_qid or "",
             languages=languages,
             articles=result.cluster.articles if result.cluster else {},
+            related_search_terms=result.related_search_terms,
         )
 
     return result
@@ -135,7 +138,14 @@ async def _resolve_impl(
                     "confirm resolved_qid or rerun with --qid."
                 )
 
-        sitelinks = await wikidata_client.get_sitelinks(client, resolved_qid)
+        # Aliases in "en" (the default search language, SPEC.md §3.1) plus
+        # every requested wiki's own language code, deduped, order-preserved
+        # — Wikidata language codes match wiki language codes for every case
+        # this project's languages currently exercise.
+        alias_languages = list(dict.fromkeys(["en", *languages]))
+        sitelinks, aliases_by_language = await wikidata_client.get_sitelinks_and_aliases(
+            client, resolved_qid, alias_languages
+        )
 
         articles: dict[str, ArticleInfo] = {}
         for lang in languages:
@@ -162,6 +172,16 @@ async def _resolve_impl(
 
         cluster = Cluster(primary_qid=resolved_qid, related_qids=related_qids, articles=articles)
 
+        already_known = {topic} if topic else set()
+        for article in articles.values():
+            if article.title:
+                already_known.add(article.title)
+            if article.redirect_from:
+                already_known.add(article.redirect_from)
+        related_search_terms = _extract_related_search_terms(
+            aliases_by_language, alias_languages, already_known
+        )
+
         return ResolveResult(
             topic_query=topic,
             resolved_qid=resolved_qid,
@@ -169,4 +189,39 @@ async def _resolve_impl(
             ambiguous=ambiguous,
             cluster=cluster,
             warnings=warnings,
+            related_search_terms=related_search_terms,
         )
+
+
+def _extract_related_search_terms(
+    aliases_by_language: dict[str, list[str]],
+    alias_languages: list[str],
+    already_known: set[str],
+) -> list[str]:
+    """Flatten Wikidata's per-language alias lists into a deduped, capped
+    top-`MAX_RELATED_SEARCH_TERMS` list — real "also known as" phrasings a
+    user could try in a follow-up `resolve --topic`, distinct from
+    `candidates`/`cluster` (which are about *this* resolution, not future
+    queries).
+
+    Iterates `alias_languages` in the order `resolve` requested them (so
+    output order is deterministic across languages, even though a JSON
+    object's own key order isn't guaranteed), dedupes case-insensitively
+    (keeping the first-seen casing), and drops anything that's just the
+    topic query or an already-known article/redirect title under a
+    different case — those aren't new search terms, they're what was
+    already typed or already resolved.
+    """
+    known_casefold = {term.casefold() for term in already_known}
+    seen_casefold: set[str] = set()
+    terms: list[str] = []
+    for lang in alias_languages:
+        for alias in aliases_by_language.get(lang, []):
+            folded = alias.casefold()
+            if folded in known_casefold or folded in seen_casefold:
+                continue
+            seen_casefold.add(folded)
+            terms.append(alias)
+            if len(terms) >= MAX_RELATED_SEARCH_TERMS:
+                return terms
+    return terms

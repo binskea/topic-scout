@@ -21,6 +21,20 @@ turned out to be wrong (it's "Bibliography," not the intended topic) — all
 examples below now use an explicit `Q_EXAMPLE` placeholder, and `resolve`
 must always look up QIDs live, never hardcode one.
 
+**Updated 2026-09-25 (Milestone 13 — related search terms):** `resolve`
+now also returns `related_search_terms` (§3.1) — up to 10 Wikidata
+aliases ("also known as" labels) for the resolved topic, in the languages
+requested, deduped against the topic query and every already-resolved
+article/redirect title. This is sourced from a `props=aliases` addition to
+the same `wbgetentities` call `resolve` already makes for sitelinks (see
+`references/api-notes.md` §2.2) — no new endpoint. It's persisted on
+project state and surfaced as a new "Related search terms" section in the
+one-page PDF report (§6), but is explicitly **not** one of `verify`'s
+numeric claims (§3.6) — it's descriptive text, deterministic and sourced
+from stored state like `assumptions_text`, not a number/date fact to
+cross-check. This is deliberately *not* the same thing as search-query
+volume or a count of users who searched — see §8's restated limitation.
+
 ## 1. Directory layout
 
 ```
@@ -227,9 +241,18 @@ hardcodes one.
       "uk": {"wiki": "uk.wikipedia", "exists": false, "reason": "no_sitelink"}
     }
   },
-  "warnings": ["uk: no Wikidata sitelink for this QID"]
+  "warnings": ["uk: no Wikidata sitelink for this QID"],
+  "related_search_terms": ["intermittent-fasting", "16:8 diet", "time-restricted eating"]
 }
 ```
+`related_search_terms` (Milestone 13): up to 10 Wikidata aliases for
+`resolved_qid`, pooled across `"en"` plus every requested language,
+deduped case-insensitively, excluding anything equal to `topic_query` or
+to any resolved article/redirect title. Empty when the entity has no
+aliases in the requested languages — not an error, just nothing new to
+suggest. These are alternate phrasings of the *same* Wikipedia topic for a
+follow-up `resolve --topic`, not a market-research synonym list and not
+search-query data (see §8).
 `candidates` has no numeric relevance score — real `wbsearchentities`
 responses don't return one (confirmed in Milestone 0). Ambiguity is
 conveyed by list order (server-ranked) plus `match_type` (`"label"` vs.
@@ -338,7 +361,7 @@ auto|weasyprint|fpdf2` (default `auto` — see §6).
   "pdf_path": "<data-dir>/reports/intermittent-fasting-pl-cs_2026-09-22.pdf",
   "engine_used": "weasyprint",
   "page_count": 1,
-  "sections_rendered": ["summary", "trend_chart_pl", "trend_chart_cs", "confidence", "assumptions", "limitations"],
+  "sections_rendered": ["summary", "trend_chart_pl", "trend_chart_cs", "confidence", "related_search_terms", "assumptions", "limitations"],
   "numeric_claims_count": 14
 }
 ```
@@ -464,17 +487,24 @@ Section order, top to bottom:
    spike-adjusted verdict, placebo percentile, data-quality flag.
 5. **Cross-language ranking** (multi-language asks only) — small bar chart
    or ranked list answering "which language/audience to prioritize."
-6. **Assumptions** — boxed, same visual weight as body text (never
+6. **Related search terms (top 10)** (Milestone 13) — `resolve`'s
+   `related_search_terms`, persisted on project state, joined into one
+   line; a plain "no alternate phrasings found" note (never a silent
+   omission, same graceful-degradation posture as a coverage warning
+   elsewhere in this doc) when the topic has none in the requested
+   languages. Boxed like Assumptions/Limitations, not claim-panel styled —
+   it's descriptive text, not one of `verify`'s numeric claims.
+7. **Assumptions** — boxed, same visual weight as body text (never
    footnote-sized): normalization method, `agent=user` filter, date range
    actually used post-exclusions, placebo basket size, redirect resolution
    applied and whether a redirect alias's traffic was folded into the
    count for each language (per `fetch`'s `redirect_alias_included`).
-7. **Limitations** — equally prominent: pageview data reflects Wikipedia
+8. **Limitations** — equally prominent: pageview data reflects Wikipedia
    readership only, not search demand or purchase intent; short/noisy
    series near AQS's start date are unreliable; topic-to-article mapping
    may be imperfect for ambiguous topics; normalized (not raw) counts are
    shown.
-8. **Footer** — the `verify` command's PASS/FAIL stamp printed literally
+9. **Footer** — the `verify` command's PASS/FAIL stamp printed literally
    ("Numeric claims verified against source data: PASS"), so the
    anti-hallucination check is visibly attached to the artifact, not just
    asserted.
@@ -520,7 +550,19 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
 
 - Pageview data reflects Wikipedia readership only — not search demand,
   app-store demand, or purchase intent; it's a proxy signal for "where to
-  look next," not a market-sizing tool.
+  look next," not a market-sizing tool. Nothing in this design can answer
+  "how many users searched for X" or "peak concurrent searchers" — AQS
+  exposes page *view* counts (with a bot-filtered `agent=user`, still not a
+  unique-visitor count), never search-query volume or a unique-searcher
+  count, and no such data is publicly published by Wikimedia at all. The
+  closest honest proxy already in this design is a single day's peak
+  normalized share of traffic (surfaced via `analyze`'s MAD spike
+  detection, §5) — real views, not users, and not search intent.
+- `related_search_terms` (§3.1, Milestone 13) is Wikidata's own alias list
+  for the resolved topic, not a market-research synonym/keyword-demand
+  tool — coverage varies a lot by topic and language (a well-curated
+  entity may have many aliases, an obscure one none), and an empty list
+  means no aliases were recorded, not that no alternate phrasings exist.
 - Short or noisy series near AQS's actual history start date
   (`[UNVERIFIED-LIVE]`, believed ~2015-07) are unreliable; `fetch` clamps
   over-long requested ranges and warns rather than silently truncating.

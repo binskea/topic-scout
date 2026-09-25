@@ -18,6 +18,7 @@ from curiosity_radar.report.render import (
     assumptions_text,
     build_claims,
     headline_text,
+    related_search_terms_text,
 )
 
 TEMPLATE_PATH = Path(__file__).parent / "template.html"
@@ -75,6 +76,12 @@ def _build_body(context: ReportContext, claims: list[Claim]) -> tuple[str, list[
         )
         parts.append(f'<h2>Cross-language ranking</h2><div class="ranking">{rows}</div>')
         sections.append("cross_language_ranking")
+
+    parts.append(
+        "<h2>Related search terms (top 10)</h2>"
+        f'<div class="assumptions">{escape(related_search_terms_text(context))}</div>'
+    )
+    sections.append("related_search_terms")
 
     parts.append(
         f'<h2>Assumptions</h2><div class="assumptions">{escape(assumptions_text(context))}</div>'

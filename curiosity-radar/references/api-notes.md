@@ -191,7 +191,7 @@ array present on alias matches). `resolve`'s `candidates` output must not
 invent a numeric score — `SPEC.md` has been corrected to drop it.
 `search-continue` supports pagination beyond `limit`.
 
-### 2.2 Entity data (QID → sitelinks, labels, descriptions)
+### 2.2 Entity data (QID → sitelinks, labels, descriptions, aliases)
 
 ```
 GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids={QID}&props=sitelinks&format=json
@@ -221,6 +221,40 @@ reports `exists: false, reason: "no_sitelink"`). `[CONFIRMED 2026-09-22 for
 the dbname pattern on the languages observed; still worth a lookup table
 rather than blind concatenation for languages with known irregular codes,
 none of which appeared in this sample]`
+
+**Milestone 13 addition — aliases, folded into the same call:**
+```
+GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids={QID}&props=sitelinks|aliases&languages=en|pl|cs&format=json
+```
+```json
+{
+  "entities": {
+    "Q_EXAMPLE": {
+      "type": "item",
+      "id": "Q_EXAMPLE",
+      "sitelinks": {"...": "as above"},
+      "aliases": {
+        "en": [{"language": "en", "value": "Alternate Name"}],
+        "pl": [{"language": "pl", "value": "Nazwa alternatywna"}]
+      }
+    }
+  },
+  "success": 1
+}
+```
+`[UNVERIFIED-LIVE]`: this follows Wikidata's documented Wikibase API
+contract exactly (the same `aliases.<lang> = [{language, value}]` shape
+every Wikibase deployment uses), but — unlike the `props=sitelinks` call
+above — hasn't itself been exercised against a live request in this
+account's cloud environment; the blanket Wikimedia/Wikidata egress block
+(§9 item 8 of `SPEC.md`, still unresolved) applies here too.
+`languages` restricts which language(s)' aliases come back — omitted
+entirely, all languages the entity has aliases in are returned; `resolve`
+always passes it explicitly (`"en"` plus every requested wiki language) to
+avoid pulling aliases in languages nobody asked about. An entity with zero
+aliases in a given language simply omits that language's key from
+`aliases` (not an empty array) — `resolve`'s `get_sitelinks_and_aliases`
+treats a missing key the same as an empty list.
 
 **Reminder (see top of file): don't reuse `Q1631107` as "intermittent
 fasting" anywhere — it's Bibliography.** Use `Q_EXAMPLE` in docs/tests, and

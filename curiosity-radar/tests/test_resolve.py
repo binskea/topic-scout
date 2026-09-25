@@ -517,6 +517,190 @@ def test_resolve_persistent_rate_limit_is_a_clean_error(
     assert calls == http_module.MAX_ATTEMPTS  # exhausted the bounded retry budget, not one-shot
 
 
+def test_resolve_related_search_terms_from_wikidata_aliases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Aliases (Wikidata's "also known as" labels) become `related_search_terms`
+    — deduped, and excluding anything that's just the topic query or an
+    already-resolved article title under a different case, since those
+    aren't new search terms."""
+    qid = "Q28865"
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "Python (programming language)"},
+                {
+                    "searchinfo": {"search": "Python (programming language)"},
+                    "search": [
+                        {
+                            "id": qid,
+                            "title": qid,
+                            "pageid": 1,
+                            "concepturi": f"http://www.wikidata.org/entity/{qid}",
+                            "repository": "wikidata",
+                            "url": f"//www.wikidata.org/wiki/{qid}",
+                            "display": {"label": {"value": "Python", "language": "en"}},
+                            "label": "Python",
+                            "match": {
+                                "type": "label",
+                                "language": "en",
+                                "text": "Python (programming language)",
+                            },
+                        }
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": qid},
+                {
+                    "entities": {
+                        qid: {
+                            "type": "item",
+                            "id": qid,
+                            "sitelinks": {
+                                "enwiki": {
+                                    "site": "enwiki",
+                                    "title": "Python (programming language)",
+                                    "badges": [],
+                                },
+                                "plwiki": {
+                                    "site": "plwiki",
+                                    "title": "Python (język programowania)",
+                                    "badges": [],
+                                },
+                            },
+                            "aliases": {
+                                "en": [
+                                    {"language": "en", "value": "Python programming language"},
+                                    {"language": "en", "value": "Python lang"},
+                                    # Duplicate of the article title itself
+                                    # (case-insensitive) — must be excluded.
+                                    {"language": "en", "value": "python (programming language)"},
+                                ],
+                                "pl": [
+                                    {"language": "pl", "value": "Język Python"},
+                                    # Duplicate of the pl article title.
+                                    {"language": "pl", "value": "Python (język programowania)"},
+                                    # Duplicate of an already-seen (en) term.
+                                    {"language": "pl", "value": "Python lang"},
+                                ],
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Python (programming language)"},
+                _load("07a_mediawiki_normal.json"),
+            ),
+            (
+                {"action": "query", "titles": "Python (język programowania)"},
+                {
+                    "batchcomplete": "",
+                    "query": {
+                        "pages": {
+                            "1": {"pageid": 1, "ns": 0, "title": "Python (język programowania)"}
+                        }
+                    },
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="Python (programming language)",
+        qid=None,
+        languages=["en", "pl"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.related_search_terms == [
+        "Python programming language",
+        "Python lang",
+        "Język Python",
+    ]
+
+
+def test_resolve_related_search_terms_capped_at_ten(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    qid = "Q_MANY_ALIASES"
+    aliases = [{"language": "en", "value": f"alias {i}"} for i in range(15)]
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "many aliases topic"},
+                {
+                    "searchinfo": {"search": "many aliases topic"},
+                    "search": [
+                        {
+                            "id": qid,
+                            "title": qid,
+                            "pageid": 1,
+                            "concepturi": f"http://www.wikidata.org/entity/{qid}",
+                            "repository": "wikidata",
+                            "url": f"//www.wikidata.org/wiki/{qid}",
+                            "display": {"label": {"value": "many aliases topic", "language": "en"}},
+                            "label": "many aliases topic",
+                            "match": {
+                                "type": "label",
+                                "language": "en",
+                                "text": "many aliases topic",
+                            },
+                        }
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": qid},
+                {
+                    "entities": {
+                        qid: {
+                            "type": "item",
+                            "id": qid,
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Many Aliases", "badges": []}
+                            },
+                            "aliases": {"en": aliases},
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Many Aliases"},
+                {
+                    "batchcomplete": "",
+                    "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": "Many Aliases"}}},
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="many aliases topic",
+        qid=None,
+        languages=["en"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert len(result.related_search_terms) == 10
+    assert result.related_search_terms == [f"alias {i}" for i in range(10)]
+
+
 def test_resolve_explicit_qid_skips_search(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cassette = SequentialCassette(
         [

@@ -46,16 +46,25 @@ dropping languages.
    compared **and** `analysis.cross_language_ranking` is non-empty — a
    `rank. lang — reason` line per entry, in ranked order. Silently omitted
    (not a placeholder) for a single-language report.
-6. **Assumptions** (`assumptions_text`), same visual weight as body text:
+6. **Related search terms (top 10)** (Milestone 13,
+   `related_search_terms_text`): `state.related_search_terms` (populated
+   once by `resolve`, from Wikidata aliases — see `references/
+   api-notes.md` §2.2 — and persisted on project state), joined with `"; "`.
+   Falls back to `"No alternate phrasings found in Wikidata for this
+   topic."` rather than an empty/omitted section when the topic has no
+   aliases in the requested languages — same graceful-degradation posture
+   as everything else in this layout. Always rendered, same box styling as
+   Assumptions/Limitations.
+7. **Assumptions** (`assumptions_text`), same visual weight as body text:
    "Views shown as % of project-wide daily traffic (agent=user), not raw
    counts. Date range reflects exclusions already applied." plus, for any
    language whose fetch summed in a redirect alias, `"<lang>: '<alias>'
    redirect traffic folded in"`.
-7. **Limitations** (`LIMITATIONS` in `render.py`, fixed list, same for
+8. **Limitations** (`LIMITATIONS` in `render.py`, fixed list, same for
    every report): pageview data isn't search/purchase-intent demand; short
    series near AQS's history start are unreliable; topic-to-article
    mapping can be imperfect; comparisons are normalized, not raw counts.
-8. **Footer**: the literal string `"Numeric claims verified against source
+9. **Footer**: the literal string `"Numeric claims verified against source
    data: PASS"` — see the important caveat below.
 
 ## The exact claim list (`build_claims`)
@@ -96,6 +105,15 @@ including `verify`'s own re-derivation — it can never match between when
 `analyze`'s JSON at all. It's shown in the header as informational
 context only, specifically excluded from `build_claims` so `verify` never
 flags it as a false mismatch.
+
+`context.related_search_terms` (Milestone 13) is deliberately excluded too
+— for a different reason than `generated_at`: it *is* deterministic and
+sourced from stored state (`state.related_search_terms`, set once by
+`resolve`), the same way `assumptions_text` is, but it's a list of phrases,
+not a number/date fact — there's nothing for `verify`'s
+`label: value`-style numeric cross-check to do with it. It not being a
+claim doesn't mean it's unverified data; it means it's the wrong *kind* of
+content for that particular check.
 
 ## The footer's "PASS" is not a live verify result
 

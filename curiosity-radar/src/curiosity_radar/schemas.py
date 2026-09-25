@@ -66,6 +66,7 @@ class ResolveResult(StrictModel):
     ambiguous: bool
     cluster: Cluster | None = None
     warnings: list[str] = []
+    related_search_terms: list[str] = []
 
 
 # ---------------------------------------------------------------------------
