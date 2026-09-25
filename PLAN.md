@@ -615,3 +615,55 @@ Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
 clean, confirmed both in-place and from the isolated checkout above. With
 this milestone, every `PLAN.md` milestone is either done or explicitly and
 narrowly blocked (Milestone 11's live run alone) — none silently skipped.
+
+## Milestone 13 — `resolve`: suggest same-sense sibling titles when a QID has no sitelink (proposed, not started)
+
+**Motivation, from a real live run (2026-09-24):** a manual end-to-end
+`resolve → fetch → analyze → chart → report → verify` run for topic
+"articulation" (uk/ru/en) hit exactly the gap this milestone closes.
+`--topic "articulation"` alone is ambiguous on Wikidata (multiple QIDs
+share that English label — painting, phonetics, music, architecture,
+vehicle tech, ...); resolving to the phonetics-specific QID (`Q4800959`,
+"articulatory phonetics") left `uk`/`ru` both `no_sitelink` even though
+both languages *do* have a dedicated linguistics article — just filed under
+a different Wikidata item (`Q210847`, "manner of articulation": en
+"Manner of articulation", ru "Артикуляция (фонетика)", uk "Артикуляція
+(мовознавство)") that never showed up in `wbsearchentities`'s top-10
+candidates for the bare English query. The disambiguation page at the
+naive title (`Артикуляція`/`Articulation`, Wikidata `Q230158`, a genuine
+`Wikimedia disambiguation page`) was the only thing that pointed at the
+right QID — and finding it required several rounds of hand-written
+`wbgetentities`/`pageprops` queries outside the tool entirely. An agent
+using this skill unattended has no way to do that digging today; it can
+only report the dead end (`ambiguous`/`no_sitelink`) and stop.
+
+**Definition of done:**
+- When `resolve`'s chosen QID (explicit `--qid` or the top disambiguation
+  candidate) has `exists: false` / `reason: "no_sitelink"` for one or more
+  requested languages, `resolve` follows up automatically: look up whether
+  the *other* languages' resolved titles (or the bare topic query) land on
+  a Wikidata **disambiguation page** (`pageprops.disambiguation` via
+  MediaWiki, matching `SPEC.md`'s existing redirect-resolution client
+  rather than a new one) and, if so, fetch that page's list of linked
+  QIDs (already exercised informally today via `wbgetentities`
+  `sites=<lang>wiki&titles=...`).
+- Cross-check each candidate QID's sitelinks against the *requested*
+  languages (not just the query language) and surface any candidate that
+  covers strictly more of the requested languages than the currently
+  resolved QID as a new `suggested_qids` list on `ResolveResult` (alongside
+  the existing `candidates`/`warnings` fields in `schemas.py`) — each entry
+  carrying the QID, its label/description, and which requested languages it
+  would newly cover. Never auto-switch `resolved_qid`; only suggest, same
+  as the existing `ambiguous` + `candidates` behavior for the initial
+  search.
+- `SKILL.md` updated so the agent knows to check `suggested_qids` and either
+  re-run `resolve --qid <suggestion>` or ask the user, instead of treating
+  `no_sitelink` as a final answer.
+- Cassette-backed test covering exactly today's real case (a QID with
+  partial no_sitelink coverage where a same-title disambiguation page
+  exists and a sibling QID resolves full coverage) plus a negative case
+  (no disambiguation page exists / no sibling improves coverage → no
+  `suggested_qids`, unchanged behavior).
+- No new live-API dependency beyond what `resolve` already calls
+  (`wbsearchentities`, `wbgetentities`, MediaWiki `pageprops`) — this is
+  additional use of existing clients, not a new integration.
