@@ -276,3 +276,68 @@ def test_report_handles_a_non_latin_script_topic(tmp_path: Path, engine: str) ->
 
     verify_result = verify_cmd.run(project="uk-demo", pdf=None, data_dir=tmp_path)
     assert verify_result.status == "verified"
+
+
+def test_fmt_float_falls_back_to_scientific_notation_for_tiny_nonzero_values() -> None:
+    from curiosity_radar.report.render import fmt_float
+
+    # A share-of-traffic Theil-Sen slope this small (real example: a topic
+    # article growing against a many-million-view aggregate) rounds away to
+    # an indistinguishable "0.000000" at the default 6 decimals.
+    assert fmt_float(2.2775822498309024e-8) == "2.278e-08"
+    assert fmt_float(-2.2775822498309024e-8) == "-2.278e-08"
+    # A genuinely exact zero (a flat series, or a language `analyze` never
+    # ran a trend for) must still print as plain "0.000000", not switch
+    # notation just because it's small.
+    assert fmt_float(0.0) == "0.000000"
+    # Ordinary-magnitude values are untouched.
+    assert fmt_float(0.123456789) == "0.123457"
+    assert fmt_float(0.0, decimals=1) == "0.0"
+
+
+def test_report_distinguishes_two_tiny_but_different_slopes(tmp_path: Path) -> None:
+    """Reproduces the bug: two languages whose Theil-Sen slope is nonzero but
+    small enough (share of a large aggregate) to round to "0.000000" at 6
+    decimals — pre-fix, both printed identically, hiding the very number
+    `_rank_languages` tie-breaks the cross-language ranking on."""
+    huge_aggregate = _flat(50_000_000)
+    _write_series(
+        tmp_path, "uk.wikipedia", "Tiny_Topic", START, END, _rising(step=5, spike_days=())
+    )
+    _write_series(tmp_path, "uk.wikipedia", store.AGGREGATE_SLOT, START, END, huge_aggregate)
+    _write_series(
+        tmp_path, "pl.wikipedia", "Tinier_Topic", START, END, _rising(step=2, spike_days=())
+    )
+    _write_series(tmp_path, "pl.wikipedia", store.AGGREGATE_SLOT, START, END, huge_aggregate)
+    project_state.create(
+        tmp_path,
+        "tiny-cmp",
+        topic_query="tiny slopes",
+        qid="Q_EXAMPLE",
+        languages=["uk", "pl"],
+        articles={
+            "uk": ArticleInfo(title="Tiny_Topic", wiki="uk.wikipedia", exists=True),
+            "pl": ArticleInfo(title="Tinier_Topic", wiki="pl.wikipedia", exists=True),
+        },
+        start=START.isoformat(),
+        end=END.isoformat(),
+    )
+
+    result = report_cmd.run(
+        project="tiny-cmp", out=None, audience_note=None, engine="fpdf2", data_dir=tmp_path
+    )
+    assert result.page_count == 1
+
+    verify_result = verify_cmd.run(project="tiny-cmp", pdf=None, data_dir=tmp_path)
+    assert verify_result.status == "verified"
+
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(result.pdf_path).pages)
+    uk_line = next(
+        line for line in text.splitlines() if "[uk] Theil-Sen slope/day (with spikes)" in line
+    )
+    pl_line = next(
+        line for line in text.splitlines() if "[pl] Theil-Sen slope/day (with spikes)" in line
+    )
+    assert "0.000000" not in uk_line
+    assert "0.000000" not in pl_line
+    assert uk_line != pl_line  # the two slopes are genuinely different, and now visibly so

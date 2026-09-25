@@ -79,12 +79,22 @@ Two project-level claims, then per language (for each of up to
     decimal) — only if `analysis.placebo` is set (it always is, per
     `stats-methods.md`'s placebo caveat — currently always basket size 0).
 
+`fmt_float` prints fixed-point at `decimals` places *except* when a
+genuinely nonzero value would round down to all zeros at that precision
+(e.g. a Theil-Sen slope of `2.3e-8` printed at 6 decimals) — then it
+switches to scientific notation (`2.300e-08`) instead, so a real, nonzero
+trend (and the exact value the cross-language ranking tie-breaks on) is
+never rendered as an indistinguishable `"0.000000"`. A slope that is
+*exactly* `0.0` (e.g. `check_sufficiency` never ran / a flat series) still
+prints as `"0.000000"` — only a rounding-induced false zero switches
+notation.
+
 `verify` finds each label with `re.escape(label) + r"\s*:\s*([^\s]+)"`
 against the PDF's extracted text and compares the captured token
 (right-stripped of trailing `.,;`) to the expected value **exactly** —
-this is why every numeric claim is formatted with a fixed decimal count
-(`fmt_float`) rather than Python's default `str(float)`: a renderer and
-`verify`'s freshly-recomputed value must format identically or a
+this is why every numeric claim is formatted with `fmt_float` rather than
+Python's default `str(float)`: a renderer and `verify`'s freshly-recomputed
+value must format identically (scientific notation included) or a
 false-positive mismatch would fire on formatting alone, not a real
 discrepancy.
 

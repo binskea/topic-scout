@@ -32,6 +32,14 @@ LIMITATIONS = [
 
 
 def fmt_float(value: float, decimals: int = 6) -> str:
+    """Fixed-point at `decimals` places, falling back to scientific notation
+    when that many places would round a genuinely nonzero value down to an
+    indistinguishable string of zeros — Theil-Sen slopes are in
+    share-of-traffic units, routinely 1e-6 to 1e-8, and printing them all as
+    "0.000000" hides both the trend's real magnitude and the very value the
+    cross-language ranking tie-breaks on."""
+    if value != 0 and round(value, decimals) == 0:
+        return f"{value:.3e}"
     return f"{value:.{decimals}f}"
 
 
