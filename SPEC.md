@@ -233,6 +233,7 @@ hardcodes one.
     },
     "category_qids": ["Q_EXAMPLE_CAT"]
   },
+  "suggested_qids": [{"qid": "Q_NEIGHBOR", "label": "intermittent fasting (diet)", "description": "...", "additional_languages": ["uk"]}],
   "warnings": ["uk: no Wikidata sitelink for this QID"]
 }
 ```
@@ -249,6 +250,24 @@ Persisted on the saved project and used by `analyze`'s placebo test (§5,
 §9 item 1) to exclude thematically related articles from the comparison
 basket — see `references/stats-methods.md` for why P31/P279 rather than a
 literal "category" property.
+
+**`suggested_qids`** (Milestone 15 — renumbered in the consolidation pass;
+built independently and also originally labeled "Milestone 13", with no
+code overlap against the other two same-numbered milestones above):
+populated only when `resolved_qid` has a `no_sitelink` gap in at least one
+requested language. When that
+happens, `resolve` checks the *other* entries already returned by the same
+topic search (`candidates`, no new API surface) for their own sitelink
+coverage of the requested languages; any candidate covering strictly more
+of them than `resolved_qid` is surfaced here with the specific
+`additional_languages` it would add. This is a proposal only, never an
+automatic substitution — same relationship `candidates` has to `resolved_qid`
+when `ambiguous` — the agent decides whether to rerun `resolve --qid
+<suggestion>`. `--qid` (search skipped) yields no `candidates` and
+therefore no `suggested_qids` either. See §9 item 2 for why this isn't the
+weaker "cross-wiki title search without a sitelink" that was already
+rejected for v1: every suggested QID still has its own formal Wikidata
+sitelink, it's simply a different entity than the one first resolved.
 
 **Redirect aliases are tracked separately by AQS pageviews** — confirmed in
 Milestone 0, a redirect title (e.g. `cs`'s `Intermitentní půst` above)
@@ -637,6 +656,14 @@ happened.
    fallback search, `exists: false, reason: "no_sitelink"`, downstream
    commands skip the language with a warning. `references/error-catalog.md`
    documents this as a "soft failure," not an error.
+   **Extended (Milestone 13):** the rejected "weaker" option above was
+   specifically a cross-wiki title search with no formal sitelink. `resolve`
+   now additionally checks the topic-search `candidates` it already fetched
+   (still each a real Wikidata entity with its own formal sitelinks, not a
+   new/weaker search) for their language coverage, and surfaces any that
+   cover more requested languages than `resolved_qid` in `suggested_qids`
+   (§3.1) — a proposal `SKILL.md` tells the agent to check before reporting
+   a language as unavailable, never an automatic substitution.
 3. **AQS true history start date and over-long-range clamping.**
    `[UNVERIFIED-LIVE]` — confirm in Milestone 0, then clamp/warn rather than
    silently return less data than requested.

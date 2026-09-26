@@ -806,3 +806,42 @@ something the skill needed to actually implement, not just note.
 
 Full suite: 131 tests (6 new), `ruff check`, `ruff format --check`,
 `mypy src/` all clean.
+
+## Milestone 15 — `resolve` suggests alternate QIDs on a sitelink gap — ✅ DONE 2026-09-25
+
+**Numbering note (consolidation pass):** built independently, also
+originally numbered "Milestone 13" (same collision as Milestone 14's
+note above) — renumbered to 15 since it merged third. No code overlap
+with Milestones 13/14: this touches `commands/resolve.py`'s sitelink-gap
+handling and `schemas.py`'s `SuggestedQid`, disjoint from both.
+
+**Prompted by a real live `resolve` run** (topic "Articulation"): the
+resolved QID had a `no_sitelink` gap in a requested language, while another
+entity from the same `wbsearchentities` results (a different, "neighboring"
+sense of the same topic word) actually had a sitelink for it — but nothing
+surfaced that to the agent, which per `SKILL.md`'s prior wording would just
+report the language dropped and stop there.
+
+**Definition of done:** when `resolved_qid` has a `no_sitelink` gap in at
+least one requested language, `resolve` checks the other `candidates`
+already fetched from the same topic search (no new/weaker cross-wiki
+search — see `SPEC.md` §9 item 2's original rejection of that) for their
+own sitelink coverage of the requested languages. Any candidate covering
+strictly more of them than `resolved_qid` is added to a new `suggested_qids`
+list (`schemas.py`), each entry naming the specific `additional_languages`
+it would add. Never an automatic substitution — same relationship
+`candidates` has to `resolved_qid` during an `ambiguous` match.
+`SKILL.md`'s "After `resolve`" section now tells the agent to check
+`suggested_qids` before reporting a language as unavailable, instead of
+stopping at `no_sitelink`.
+
+**Met.** `commands/resolve.py` computes `suggested_qids` only when there's
+an actual gap (an unaffected `resolve` call makes zero extra HTTP requests
+— covered by the existing cassette tests' `assert_exhausted()`, which would
+fail if extra calls were made unnecessarily). `--qid` (search skipped)
+still yields no `candidates` and therefore no `suggested_qids` either,
+unchanged from before. `SPEC.md` §3.1's worked example, §9 item 2's
+resolution note, and `references/error-catalog.md`'s soft-failures table
+updated; `test_resolve.py` covers both the positive case (a candidate
+covering the missing language) and the negative case (candidates exist but
+none cover more languages, so `suggested_qids` stays empty).
