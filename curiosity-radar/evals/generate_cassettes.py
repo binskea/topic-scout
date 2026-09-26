@@ -147,13 +147,19 @@ def _manifest_for_scenario(scenario: Scenario) -> dict[str, dict]:
         }
     }
 
+    # Same dedup/ordering as `resolve.py`'s own `alias_languages` (`"en"`
+    # first, then each requested language, in the order the scenario's
+    # `--languages` are passed) — the aliases `props`/`languages` params
+    # must match exactly or this cassette entry misses.
+    alias_languages = list(dict.fromkeys(["en", *(p.lang for p in scenario.languages)]))
     entities_key = _key(
         "GET",
         WIKIDATA_API,
         {
             "action": "wbgetentities",
             "ids": scenario.qid,
-            "props": "sitelinks|claims",
+            "props": "sitelinks|claims|aliases",
+            "languages": "|".join(alias_languages),
             "format": "json",
         },
     )
@@ -167,6 +173,14 @@ def _manifest_for_scenario(scenario: Scenario) -> dict[str, dict]:
                         f"{p.lang}wiki": {"site": f"{p.lang}wiki", "title": p.title, "badges": []}
                         for p in scenario.languages
                     },
+                    # No synthetic claims/aliases here — this eval fixture's
+                    # job is exercising the command chain against known
+                    # trend shapes (see module docstring), not the
+                    # category-exclusion or alias-derived related_search_
+                    # terms features, which have their own dedicated
+                    # cassette-backed tests in test_analyze.py/test_resolve.py.
+                    "claims": {},
+                    "aliases": {},
                 }
             },
             "success": 1,

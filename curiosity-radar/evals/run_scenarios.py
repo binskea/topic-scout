@@ -180,6 +180,12 @@ def _run_scenario(scenario: Scenario, *, api_key: str, model: str) -> dict[str, 
         "CURIOSITY_RADAR_CASSETTE_DIR": str(ROOT / "evals" / "cassettes" / scenario.slug),
         "CURIOSITY_RADAR_FAKE_TODAY": scenario.fake_today,
         "CURIOSITY_RADAR_DATA_DIR": str(data_dir),
+        # Milestone 13's placebo-basket sourcing predates none of these
+        # scenarios' fixtures, which have no top-articles/candidate-entity
+        # cassette entries recorded — same reason tests/conftest.py defaults
+        # BASKET_POOL_SIZE to 0 for pytest, just via the env-var seam since
+        # this runs as a real subprocess instead.
+        "CURIOSITY_RADAR_BASKET_POOL_SIZE": "0",
     }
 
     system_prompt = (

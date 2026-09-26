@@ -61,6 +61,7 @@ def _run_followup(*, scenario_slug: str, prompt: str, api_key: str, model: str) 
         "CURIOSITY_RADAR_CASSETTE_DIR": str(ROOT / "evals" / "cassettes" / scenario.slug),
         "CURIOSITY_RADAR_FAKE_TODAY": scenario.fake_today,
         "CURIOSITY_RADAR_DATA_DIR": str(data_dir),
+        "CURIOSITY_RADAR_BASKET_POOL_SIZE": "0",
     }
 
     system_prompt = (

@@ -5,12 +5,20 @@ Milestone 2: resolves live against Wikidata (`wbsearchentities`/
 `resolve` never hardcodes a QID (see `references/api-notes.md`'s
 `Q1631107` cautionary tale) — every topic is looked up fresh.
 
-Milestone 13: when the resolved QID has a `no_sitelink` gap in at least one
+Milestone 15: when the resolved QID has a `no_sitelink` gap in at least one
 requested language, the other topic-search `candidates` (already fetched,
 never a new/weaker cross-wiki search per `SPEC.md` §9 item 2) are checked
 for sitelink coverage too. A candidate covering more of the requested
 languages than `resolved_qid` is surfaced in `suggested_qids` — a proposal,
 never an automatic substitution, same as `ambiguous`/`candidates`.
+
+Consolidation pass: `category_qids` (Milestone 13), `suggested_qids`
+(Milestone 15), and `related_search_terms`/`aliases_by_language` (this
+milestone) each independently added their own `wikidata_client` call for
+the resolved QID on separate branches. Merged into the single
+`props="sitelinks|claims|aliases"` `get_entity` call below — same
+one-round-trip principle each of those branches already stated for its own
+addition, just extended to all three at once.
 """
 
 from __future__ import annotations
@@ -32,6 +40,8 @@ from curiosity_radar.schemas import (
 )
 from curiosity_radar.wikimedia import mediawiki_client, wikidata_client
 from curiosity_radar.wikimedia.http import RETRY_STATUS_CODES, build_client
+
+MAX_RELATED_SEARCH_TERMS = 10
 
 
 def run(
@@ -64,6 +74,7 @@ def run(
             languages=languages,
             articles=result.cluster.articles if result.cluster else {},
             category_qids=result.cluster.category_qids if result.cluster else [],
+            related_search_terms=result.related_search_terms,
         )
 
     return result
@@ -149,9 +160,20 @@ async def _resolve_impl(
                     "confirm resolved_qid or rerun with --qid."
                 )
 
-        entity = await wikidata_client.get_entity(client, resolved_qid, props="sitelinks|claims")
+        # Aliases in "en" (the default search language, SPEC.md §3.1) plus
+        # every requested wiki's own language code, deduped, order-preserved
+        # — Wikidata language codes match wiki language codes for every case
+        # this project's languages currently exercise.
+        alias_languages = list(dict.fromkeys(["en", *languages]))
+        entity = await wikidata_client.get_entity(
+            client,
+            resolved_qid,
+            props="sitelinks|claims|aliases",
+            languages="|".join(alias_languages),
+        )
         sitelinks = wikidata_client.sitelinks_from_entity(entity)
         category_qids = wikidata_client.category_qids_from_entity(entity)
+        aliases_by_language = wikidata_client.aliases_from_entity(entity, alias_languages)
 
         articles: dict[str, ArticleInfo] = {}
         missing_languages: list[str] = []
@@ -203,6 +225,16 @@ async def _resolve_impl(
             category_qids=sorted(category_qids),
         )
 
+        already_known = {topic} if topic else set()
+        for article in articles.values():
+            if article.title:
+                already_known.add(article.title)
+            if article.redirect_from:
+                already_known.add(article.redirect_from)
+        related_search_terms = _extract_related_search_terms(
+            aliases_by_language, alias_languages, already_known
+        )
+
         return ResolveResult(
             topic_query=topic,
             resolved_qid=resolved_qid,
@@ -211,4 +243,39 @@ async def _resolve_impl(
             cluster=cluster,
             suggested_qids=suggested_qids,
             warnings=warnings,
+            related_search_terms=related_search_terms,
         )
+
+
+def _extract_related_search_terms(
+    aliases_by_language: dict[str, list[str]],
+    alias_languages: list[str],
+    already_known: set[str],
+) -> list[str]:
+    """Flatten Wikidata's per-language alias lists into a deduped, capped
+    top-`MAX_RELATED_SEARCH_TERMS` list — real "also known as" phrasings a
+    user could try in a follow-up `resolve --topic`, distinct from
+    `candidates`/`cluster` (which are about *this* resolution, not future
+    queries).
+
+    Iterates `alias_languages` in the order `resolve` requested them (so
+    output order is deterministic across languages, even though a JSON
+    object's own key order isn't guaranteed), dedupes case-insensitively
+    (keeping the first-seen casing), and drops anything that's just the
+    topic query or an already-known article/redirect title under a
+    different case — those aren't new search terms, they're what was
+    already typed or already resolved.
+    """
+    known_casefold = {term.casefold() for term in already_known}
+    seen_casefold: set[str] = set()
+    terms: list[str] = []
+    for lang in alias_languages:
+        for alias in aliases_by_language.get(lang, []):
+            folded = alias.casefold()
+            if folded in known_casefold or folded in seen_casefold:
+                continue
+            seen_casefold.add(folded)
+            terms.append(alias)
+            if len(terms) >= MAX_RELATED_SEARCH_TERMS:
+                return terms
+    return terms

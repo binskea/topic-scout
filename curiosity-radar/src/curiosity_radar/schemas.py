@@ -75,6 +75,7 @@ class ResolveResult(StrictModel):
     cluster: Cluster | None = None
     suggested_qids: list[SuggestedQid] = []
     warnings: list[str] = []
+    related_search_terms: list[str] = []
 
 
 # ---------------------------------------------------------------------------

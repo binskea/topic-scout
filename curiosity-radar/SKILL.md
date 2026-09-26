@@ -79,6 +79,12 @@ exit code alone.
   title doesn't resolve) → that language has no article for this topic.
   It's silently skipped by every later command — tell the user which
   language(s) got dropped and why, don't let it pass unmentioned.
+- `related_search_terms` (up to 10 Wikidata aliases for the topic) is
+  worth mentioning to the user as alternate phrasings for a follow-up
+  `resolve --topic`, and is also carried into the PDF report's own
+  "Related search terms" section. It's alternate wording for the *same*
+  Wikipedia topic, not search-query volume or a user count — don't
+  present it as either.
 
 **After `analyze`**, before running `chart`/`report`: check each
 language's `data_quality.sufficient_for_trend`. If `false`

@@ -18,6 +18,7 @@ from curiosity_radar.report.render import (
     assumptions_text,
     build_claims,
     headline_text,
+    related_search_terms_text,
 )
 
 MARGIN = 10
@@ -62,6 +63,9 @@ class Fpdf2Renderer:
         if len(context.languages) > 1 and context.analysis.cross_language_ranking:
             self._ranking(pdf, context)
             sections.append("cross_language_ranking")
+
+        self._related_search_terms(pdf, context)
+        sections.append("related_search_terms")
 
         self._assumptions(pdf, context)
         sections.append("assumptions")
@@ -150,6 +154,13 @@ class Fpdf2Renderer:
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
+
+    def _related_search_terms(self, pdf: FPDF, context: ReportContext) -> None:
+        pdf.ln(1)
+        pdf.set_font(FONT_FAMILY, "B", 9)
+        pdf.cell(0, 5, "Related search terms (top 10)", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(FONT_FAMILY, "", 7.5)
+        pdf.multi_cell(0, 3.6, related_search_terms_text(context))
 
     def _assumptions(self, pdf: FPDF, context: ReportContext) -> None:
         pdf.ln(1)

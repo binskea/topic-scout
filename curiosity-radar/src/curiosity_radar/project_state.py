@@ -32,6 +32,7 @@ class ProjectState(BaseModel):
     languages: list[str] = []
     articles: dict[str, ArticleInfo] = {}
     category_qids: list[str] = []
+    related_search_terms: list[str] = []
     date_range_start: str
     date_range_end: str
     exclusions: list[ExclusionRange] = []
@@ -94,6 +95,7 @@ def create(
     languages: list[str],
     articles: dict[str, ArticleInfo] | None = None,
     category_qids: list[str] | None = None,
+    related_search_terms: list[str] | None = None,
     start: str | None = None,
     end: str | None = None,
 ) -> ProjectState:
@@ -105,6 +107,7 @@ def create(
         languages=languages,
         articles=articles or {},
         category_qids=category_qids or [],
+        related_search_terms=related_search_terms or [],
         date_range_start=start or default_start,
         date_range_end=end or default_end,
         created_at=datetime.now(UTC).isoformat(),
@@ -122,6 +125,7 @@ def save_from_resolve(
     languages: list[str],
     articles: dict[str, ArticleInfo] | None = None,
     category_qids: list[str] | None = None,
+    related_search_terms: list[str] | None = None,
 ) -> ProjectState:
     existing = load(data_dir, slug)
     if existing is not None:
@@ -130,6 +134,7 @@ def save_from_resolve(
         existing.languages = languages
         existing.articles = articles or {}
         existing.category_qids = category_qids or []
+        existing.related_search_terms = related_search_terms or []
         existing.analyze_stale = True
         save(data_dir, existing)
         return existing
@@ -141,4 +146,5 @@ def save_from_resolve(
         languages=languages,
         articles=articles,
         category_qids=category_qids,
+        related_search_terms=related_search_terms,
     )

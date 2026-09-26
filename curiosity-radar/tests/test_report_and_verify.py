@@ -56,7 +56,13 @@ def _flat(value: int = 100_000):
     return lambda _d: value
 
 
-def _make_project(tmp_path: Path, *, slug: str = "demo", lang: str = "en") -> None:
+def _make_project(
+    tmp_path: Path,
+    *,
+    slug: str = "demo",
+    lang: str = "en",
+    related_search_terms: list[str] | None = None,
+) -> None:
     _write_series(tmp_path, "en.wikipedia", "Growing_Topic", START, END, _rising())
     _write_series(tmp_path, "en.wikipedia", store.AGGREGATE_SLOT, START, END, _flat())
     project_state.create(
@@ -66,6 +72,7 @@ def _make_project(tmp_path: Path, *, slug: str = "demo", lang: str = "en") -> No
         qid="Q_EXAMPLE",
         languages=[lang],
         articles={lang: ArticleInfo(title="Growing_Topic", wiki="en.wikipedia", exists=True)},
+        related_search_terms=related_search_terms,
         start=START.isoformat(),
         end=END.isoformat(),
     )
@@ -249,6 +256,44 @@ def test_report_multi_language_includes_cross_language_ranking(tmp_path: Path) -
 
     verify_result = verify_cmd.run(project="cmp", pdf=None, data_dir=tmp_path)
     assert verify_result.status == "verified"
+
+
+@pytest.mark.parametrize("engine", ["fpdf2", "weasyprint"])
+def test_report_includes_related_search_terms_section(tmp_path: Path, engine: str) -> None:
+    # Top 10 Wikidata aliases, some deliberately long, to also prove this
+    # new section doesn't push the report past one page (SPEC.md §6).
+    terms = [f"alternate phrasing number {i} for the growing topic" for i in range(10)]
+    _make_project(tmp_path, related_search_terms=terms)
+
+    result = report_cmd.run(
+        project="demo", out=None, audience_note=None, engine=engine, data_dir=tmp_path
+    )
+    assert result.page_count == 1
+    assert "related_search_terms" in result.sections_rendered
+
+    text = PdfReader(result.pdf_path).pages[0].extract_text() or ""
+    assert terms[0] in text
+    assert terms[-1] in text
+
+    # Not a numeric claim: verify never checks it, but must still pass.
+    verify_result = verify_cmd.run(project="demo", pdf=None, data_dir=tmp_path)
+    assert verify_result.status == "verified"
+
+
+@pytest.mark.parametrize("engine", ["fpdf2", "weasyprint"])
+def test_report_related_search_terms_falls_back_gracefully_when_none_found(
+    tmp_path: Path, engine: str
+) -> None:
+    _make_project(tmp_path, related_search_terms=[])
+
+    result = report_cmd.run(
+        project="demo", out=None, audience_note=None, engine=engine, data_dir=tmp_path
+    )
+    assert result.page_count == 1
+    assert "related_search_terms" in result.sections_rendered
+
+    text = PdfReader(result.pdf_path).pages[0].extract_text() or ""
+    assert "No alternate phrasings found in Wikidata for this topic." in text
 
 
 @pytest.mark.parametrize("engine", ["fpdf2", "weasyprint"])

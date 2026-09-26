@@ -20,6 +20,7 @@ of always hitting the empty-basket "insufficient comparison data" path.
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -48,7 +49,11 @@ AGGREGATE_SLOT = store.AGGREGATE_SLOT
 # This implementation's own tunable choice, not a frozen SPEC.md constant —
 # see `references/stats-methods.md`. 0 disables basket sourcing entirely
 # (used by tests that don't exercise it, to keep their cassettes unchanged).
-BASKET_POOL_SIZE = 20
+# `CURIOSITY_RADAR_BASKET_POOL_SIZE` overrides it for a real subprocess that
+# can't `monkeypatch.setattr` this module directly — namely `evals/
+# run_scenarios.py`/`run_followup.py`, whose recorded cassettes predate this
+# milestone and have no top-articles/candidate-entity fixtures.
+BASKET_POOL_SIZE = int(os.environ.get("CURIOSITY_RADAR_BASKET_POOL_SIZE", "20"))
 
 
 def run(
