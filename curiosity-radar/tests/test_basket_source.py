@@ -10,9 +10,11 @@ import asyncio
 from datetime import date
 
 import httpx
+import pytest
 from _cassette import SequentialCassette
 
 from curiosity_radar.wikimedia import aqs_client, basket_source, wikidata_client
+from curiosity_radar.wikimedia import http as http_module
 from curiosity_radar.wikimedia.http import build_client
 
 
@@ -121,6 +123,37 @@ def test_fetch_candidate_category_qids_drops_titles_with_no_wikidata_item() -> N
     result = asyncio.run(_run())
     cassette.assert_exhausted()
     assert result == {"A": frozenset({"Q9"})}
+
+
+def test_fetch_candidate_category_qids_skips_a_title_whose_lookup_stays_rate_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One flaky title among several must not lose the ones already looked
+    up, or block the ones after it — there's no per-title cache to fall
+    back on here, so a hard failure would otherwise cost the whole batch."""
+
+    async def _no_sleep(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(http_module.asyncio, "sleep", _no_sleep)
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        query = dict(pair.split("=") for pair in str(request.url.query, "utf-8").split("&"))
+        if query.get("titles") == "Flaky":
+            return httpx.Response(429, json={"error": "rate limited"})
+        return httpx.Response(
+            200,
+            json={"entities": {"Q1": {"id": "Q1", "claims": {}}}},
+        )
+
+    async def _run() -> dict[str, frozenset[str]]:
+        async with build_client(transport=httpx.MockTransport(_handler)) as client:
+            return await basket_source.fetch_candidate_category_qids(
+                client, "en.wikipedia", ["A", "Flaky", "B"]
+            )
+
+    result = asyncio.run(_run())
+    assert result == {"A": frozenset(), "B": frozenset()}
 
 
 def test_aqs_fetch_top_articles_returns_empty_list_on_404() -> None:

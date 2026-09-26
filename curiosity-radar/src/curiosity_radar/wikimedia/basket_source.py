@@ -90,11 +90,20 @@ async def fetch_candidate_category_qids(
     (a redirect/disambiguation oddity, or a genuinely wikibase-less page)
     are simply absent from the result, not an error — `fetch` drops them
     from the cached candidate pool entirely rather than caching a
-    known-incomplete exclusion set for them."""
+    known-incomplete exclusion set for them.
+
+    A single title's lookup exhausting its own retries (rate-limited or
+    unreachable) is treated the same way — dropped, not fatal — so one
+    flaky call among ~20 sequential ones doesn't lose every title already
+    looked up this call (there's no incremental cache here the way
+    `cache/store.ensure_series` has per month)."""
     site = dbname_for_wiki(wiki)
     result: dict[str, frozenset[str]] = {}
     for title in titles:
-        entity = await wikidata_client.get_entity_by_site_title(client, site, title)
+        try:
+            entity = await wikidata_client.get_entity_by_site_title(client, site, title)
+        except (httpx.HTTPStatusError, httpx.TransportError):
+            continue
         if entity is not None:
             result[title] = wikidata_client.category_qids_from_entity(entity)
     return result
