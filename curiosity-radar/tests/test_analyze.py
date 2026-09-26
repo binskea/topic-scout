@@ -14,6 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from curiosity_radar import project_state
+from curiosity_radar.cache import basket as basket_cache
 from curiosity_radar.cache import store
 from curiosity_radar.commands import analyze as analyze_cmd
 from curiosity_radar.project_state import ExclusionRange
@@ -286,6 +287,91 @@ def test_cross_language_ranking_orders_strongest_trend_first(tmp_path: Path) -> 
     assert [entry.lang for entry in result.cross_language_ranking] == ["strong_lang", "weak_lang"]
     assert result.cross_language_ranking[0].rank == 1
     assert result.cross_language_ranking[1].rank == 2
+
+
+def test_analyze_produces_a_real_placebo_verdict_from_a_sourced_basket(tmp_path: Path) -> None:
+    """Milestone 13: with a `cache/basket/` file present (as `fetch` now
+    writes), `analyze` must produce a real verdict rather than always
+    hitting the empty-pool "insufficient comparison data" path — and must
+    apply both the popularity-tier and category-exclusion filters, not just
+    dump every cached candidate straight into the basket."""
+    wiki = "en.wikipedia"
+    title = "Growing_Topic"
+    _write_series(tmp_path, wiki, title, START, END, _rising(base=1000, step=50))
+    _write_series(tmp_path, wiki, store.AGGREGATE_SLOT, START, END, _flat(100_000))
+
+    candidates = []
+    for i in range(15):
+        candidate_title = f"Flat_Candidate_{i}"
+        _write_series(tmp_path, wiki, candidate_title, START, END, _flat(1000 + i))
+        candidates.append(basket_cache.BasketCandidateMeta(title=candidate_title, category_qids=[]))
+
+    # Shares the topic's own category — must be excluded despite being in the
+    # right popularity tier.
+    same_category_title = "Same_Category_Candidate"
+    _write_series(tmp_path, wiki, same_category_title, START, END, _flat(1000))
+    candidates.append(
+        basket_cache.BasketCandidateMeta(title=same_category_title, category_qids=["Q_TOPIC_CAT"])
+    )
+
+    # Wildly more popular (outside ±1 order of magnitude) — must be excluded
+    # by the popularity-tier filter, unrelated category or not.
+    too_popular_title = "Too_Popular_Candidate"
+    _write_series(tmp_path, wiki, too_popular_title, START, END, _flat(10_000_000))
+    candidates.append(basket_cache.BasketCandidateMeta(title=too_popular_title, category_qids=[]))
+
+    basket_cache.save(
+        tmp_path,
+        wiki,
+        basket_cache.BasketCacheFile(sourced_month="2024-08", candidates=candidates),
+    )
+
+    project_state.create(
+        tmp_path,
+        "demo",
+        topic_query="growing topic",
+        qid="Q1",
+        languages=["en"],
+        articles={"en": ArticleInfo(title=title, wiki=wiki, exists=True)},
+        category_qids=["Q_TOPIC_CAT"],
+        start=START.isoformat(),
+        end=END.isoformat(),
+    )
+
+    result = analyze_cmd.run(
+        project="demo",
+        compare_languages=True,
+        placebo_basket_size=20,
+        force_recompute=False,
+        data_dir=tmp_path,
+    )
+    lang_result = result.languages["en"]
+    assert lang_result.placebo is not None
+    assert "insufficient comparison data" not in lang_result.placebo.verdict
+    # 15 flat candidates eligible; same-category and too-popular both dropped.
+    assert lang_result.placebo.basket_size == 15
+    assert lang_result.placebo.basket_median_slope == 0.0
+    assert lang_result.placebo.topic_slope_percentile_vs_basket == 100.0
+    assert lang_result.placebo.verdict == "trend exceeds wiki-wide background drift"
+
+
+def test_analyze_still_reports_insufficient_data_when_no_basket_was_ever_sourced(
+    tmp_path: Path,
+) -> None:
+    """A project whose wiki was never `fetch`ed with basket sourcing (or
+    predates Milestone 13 entirely) has no `cache/basket/` file at all —
+    `analyze` must degrade to the pre-Milestone-13 behavior, not crash."""
+    _make_project(tmp_path, article_series=_rising(), aggregate_series=_flat())
+    result = analyze_cmd.run(
+        project="demo",
+        compare_languages=True,
+        placebo_basket_size=20,
+        force_recompute=False,
+        data_dir=tmp_path,
+    )
+    lang_result = result.languages["en"]
+    assert lang_result.placebo is not None
+    assert "insufficient comparison data" in lang_result.placebo.verdict
 
 
 def test_compare_languages_false_skips_ranking(tmp_path: Path) -> None:

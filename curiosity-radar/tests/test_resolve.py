@@ -154,6 +154,91 @@ def test_resolve_happy_path_all_languages_resolve(
     assert result.cluster.articles["cs"].title == "Python (programovací jazyk)"
 
 
+def test_resolve_extracts_the_topics_category_qids_from_claims(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Milestone 13: `resolve` now asks for `sitelinks|claims` in the same
+    `wbgetentities` call (not an extra HTTP round-trip) and exposes the
+    P31/P279 QIDs on `Cluster.category_qids`, for `stats/placebo.py`'s
+    basket-exclusion filter later. An entity with no claims at all (every
+    other test's cassette) must still resolve fine with `category_qids: []`
+    — this is the one test that actually populates `claims`."""
+    qid = "Q28865"
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "Python (programming language)"},
+                {
+                    "searchinfo": {"search": "Python (programming language)"},
+                    "search": [
+                        {
+                            "id": qid,
+                            "title": qid,
+                            "pageid": 1,
+                            "concepturi": f"http://www.wikidata.org/entity/{qid}",
+                            "repository": "wikidata",
+                            "url": f"//www.wikidata.org/wiki/{qid}",
+                            "display": {
+                                "label": {"value": "Python", "language": "en"},
+                                "description": {"value": "programming language", "language": "en"},
+                            },
+                            "label": "Python",
+                            "description": "programming language",
+                            "match": {
+                                "type": "label",
+                                "language": "en",
+                                "text": "Python (programming language)",
+                            },
+                        }
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": qid},
+                {
+                    "entities": {
+                        qid: {
+                            "type": "item",
+                            "id": qid,
+                            "sitelinks": {
+                                "enwiki": {
+                                    "site": "enwiki",
+                                    "title": "Python (programming language)",
+                                    "badges": [],
+                                }
+                            },
+                            "claims": {
+                                "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q9143"}}}}],
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Python (programming language)"},
+                _load("07a_mediawiki_normal.json"),
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="Python (programming language)",
+        qid=None,
+        languages=["en"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.cluster is not None
+    assert result.cluster.category_qids == ["Q9143"]
+
+
 def test_resolve_ambiguous_entity_flagged_not_guessed_silently(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -279,6 +364,179 @@ def test_resolve_language_with_no_sitelink_is_not_a_hard_failure(
     de_article = result.cluster.articles["de"]
     assert de_article.exists is True
     assert de_article.title == "Literaturverzeichnis"
+
+
+def _search_hit(qid: str, label: str, description: str | None = None) -> dict:
+    return {
+        "id": qid,
+        "title": qid,
+        "pageid": 1,
+        "concepturi": f"http://www.wikidata.org/entity/{qid}",
+        "repository": "wikidata",
+        "url": f"//www.wikidata.org/wiki/{qid}",
+        "display": {"label": {"value": label, "language": "en"}},
+        "label": label,
+        **({"description": description} if description else {}),
+        "match": {"type": "label", "language": "en", "text": label},
+    }
+
+
+def test_resolve_suggests_alternate_qid_covering_missing_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `no_sitelink` gap on `resolved_qid` should surface a `candidates`
+    entry that actually covers the missing language as a `suggested_qids`
+    proposal — never an automatic substitution (SPEC.md §3.1, Milestone 15),
+    prompted by a real "Articulation" resolve where this happened live."""
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "articulation"},
+                {
+                    "searchinfo": {"search": "articulation"},
+                    "search": [
+                        _search_hit("Q101", "articulation", "manner of pronouncing a speech sound"),
+                        _search_hit("Q102", "articulation", "movable joint between two bones"),
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q101"},
+                {
+                    "entities": {
+                        "Q101": {
+                            "type": "item",
+                            "id": "Q101",
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Articulation", "badges": []}
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Articulation"},
+                {
+                    "batchcomplete": "",
+                    "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": "Articulation"}}},
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q102"},
+                {
+                    "entities": {
+                        "Q102": {
+                            "type": "item",
+                            "id": "Q102",
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Joint", "badges": []},
+                                "ukwiki": {"site": "ukwiki", "title": "Суглоб", "badges": []},
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="articulation",
+        qid=None,
+        languages=["en", "uk"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.resolved_qid == "Q101"
+    assert result.cluster is not None
+    assert result.cluster.articles["uk"].exists is False
+    assert result.cluster.articles["uk"].reason == "no_sitelink"
+    assert len(result.suggested_qids) == 1
+    suggestion = result.suggested_qids[0]
+    assert suggestion.qid == "Q102"
+    assert suggestion.label == "articulation"
+    assert suggestion.additional_languages == ["uk"]
+
+
+def test_resolve_no_suggestion_when_no_candidate_covers_more_languages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Other candidates exist, but none covers more of the requested
+    languages than `resolved_qid` — `suggested_qids` must stay empty rather
+    than proposing a QID that wouldn't actually help."""
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "articulation"},
+                {
+                    "searchinfo": {"search": "articulation"},
+                    "search": [
+                        _search_hit("Q101", "articulation", "manner of pronouncing a speech sound"),
+                        _search_hit("Q103", "articulation", "a musical performance technique"),
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q101"},
+                {
+                    "entities": {
+                        "Q101": {
+                            "type": "item",
+                            "id": "Q101",
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Articulation", "badges": []}
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Articulation"},
+                {
+                    "batchcomplete": "",
+                    "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": "Articulation"}}},
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": "Q103"},
+                {
+                    "entities": {
+                        "Q103": {
+                            "type": "item",
+                            "id": "Q103",
+                            "sitelinks": {
+                                "dewiki": {"site": "dewiki", "title": "Artikulation", "badges": []}
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="articulation",
+        qid=None,
+        languages=["en", "uk"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.suggested_qids == []
 
 
 def test_resolve_redirect_chain_including_a_double_hop(
@@ -515,6 +773,190 @@ def test_resolve_persistent_rate_limit_is_a_clean_error(
         )
     assert exc_info.value.code == "rate_limited"
     assert calls == http_module.MAX_ATTEMPTS  # exhausted the bounded retry budget, not one-shot
+
+
+def test_resolve_related_search_terms_from_wikidata_aliases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Aliases (Wikidata's "also known as" labels) become `related_search_terms`
+    — deduped, and excluding anything that's just the topic query or an
+    already-resolved article title under a different case, since those
+    aren't new search terms."""
+    qid = "Q28865"
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "Python (programming language)"},
+                {
+                    "searchinfo": {"search": "Python (programming language)"},
+                    "search": [
+                        {
+                            "id": qid,
+                            "title": qid,
+                            "pageid": 1,
+                            "concepturi": f"http://www.wikidata.org/entity/{qid}",
+                            "repository": "wikidata",
+                            "url": f"//www.wikidata.org/wiki/{qid}",
+                            "display": {"label": {"value": "Python", "language": "en"}},
+                            "label": "Python",
+                            "match": {
+                                "type": "label",
+                                "language": "en",
+                                "text": "Python (programming language)",
+                            },
+                        }
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": qid},
+                {
+                    "entities": {
+                        qid: {
+                            "type": "item",
+                            "id": qid,
+                            "sitelinks": {
+                                "enwiki": {
+                                    "site": "enwiki",
+                                    "title": "Python (programming language)",
+                                    "badges": [],
+                                },
+                                "plwiki": {
+                                    "site": "plwiki",
+                                    "title": "Python (język programowania)",
+                                    "badges": [],
+                                },
+                            },
+                            "aliases": {
+                                "en": [
+                                    {"language": "en", "value": "Python programming language"},
+                                    {"language": "en", "value": "Python lang"},
+                                    # Duplicate of the article title itself
+                                    # (case-insensitive) — must be excluded.
+                                    {"language": "en", "value": "python (programming language)"},
+                                ],
+                                "pl": [
+                                    {"language": "pl", "value": "Język Python"},
+                                    # Duplicate of the pl article title.
+                                    {"language": "pl", "value": "Python (język programowania)"},
+                                    # Duplicate of an already-seen (en) term.
+                                    {"language": "pl", "value": "Python lang"},
+                                ],
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Python (programming language)"},
+                _load("07a_mediawiki_normal.json"),
+            ),
+            (
+                {"action": "query", "titles": "Python (język programowania)"},
+                {
+                    "batchcomplete": "",
+                    "query": {
+                        "pages": {
+                            "1": {"pageid": 1, "ns": 0, "title": "Python (język programowania)"}
+                        }
+                    },
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="Python (programming language)",
+        qid=None,
+        languages=["en", "pl"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.related_search_terms == [
+        "Python programming language",
+        "Python lang",
+        "Język Python",
+    ]
+
+
+def test_resolve_related_search_terms_capped_at_ten(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    qid = "Q_MANY_ALIASES"
+    aliases = [{"language": "en", "value": f"alias {i}"} for i in range(15)]
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "many aliases topic"},
+                {
+                    "searchinfo": {"search": "many aliases topic"},
+                    "search": [
+                        {
+                            "id": qid,
+                            "title": qid,
+                            "pageid": 1,
+                            "concepturi": f"http://www.wikidata.org/entity/{qid}",
+                            "repository": "wikidata",
+                            "url": f"//www.wikidata.org/wiki/{qid}",
+                            "display": {"label": {"value": "many aliases topic", "language": "en"}},
+                            "label": "many aliases topic",
+                            "match": {
+                                "type": "label",
+                                "language": "en",
+                                "text": "many aliases topic",
+                            },
+                        }
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": qid},
+                {
+                    "entities": {
+                        qid: {
+                            "type": "item",
+                            "id": qid,
+                            "sitelinks": {
+                                "enwiki": {"site": "enwiki", "title": "Many Aliases", "badges": []}
+                            },
+                            "aliases": {"en": aliases},
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Many Aliases"},
+                {
+                    "batchcomplete": "",
+                    "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": "Many Aliases"}}},
+                },
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="many aliases topic",
+        qid=None,
+        languages=["en"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert len(result.related_search_terms) == 10
+    assert result.related_search_terms == [f"alias {i}" for i in range(10)]
 
 
 def test_resolve_explicit_qid_skips_search(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

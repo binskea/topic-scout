@@ -18,14 +18,27 @@ topic is growing (and how much to trust that), or wants a shareable report
 recommending which audiences/languages to investigate next — the kind of
 signal a B2C founder uses to decide what to build or localize next.
 
-**Known gap, always disclose it:** `analyze`'s `placebo` field is real and
-schema-valid, but always reports "insufficient comparison data... found 0"
-today — there's no live basket-sourcing mechanism yet (`SPEC.md` §9 item
-1). Don't present a placebo percentile as a real confidence signal in your
-answer to the user; lean on the Theil-Sen/Mann-Kendall `confidence_label`
-instead, and say so if asked how much to trust a trend.
+**Known gap, always disclose it in the final report/answer:** `analyze`'s
+`placebo` field is real and schema-valid, but a project whose basket
+sourcing hasn't run yet (or found too few eligible candidates) reports
+"insufficient comparison data... found N" (`SPEC.md` §9 item 1). This
+affects only the placebo percentile, not the rest of the pipeline: don't
+present a placebo percentile as a real confidence signal in your answer to
+the user when it reads "insufficient," and lean on the Theil-Sen/
+Mann-Kendall `confidence_label` instead when asked how much to trust a
+trend — but this gap is not a reason to skip `chart`, `report`, or
+`verify`. It never invalidates the trend statistics themselves, so it
+never justifies stopping the pipeline early: still run every step below
+and still verify the report before answering.
 
 ## Command sequence
+
+For a new (non-follow-up) request, always run this full sequence,
+`resolve` through `verify`, before answering the user. Do not stop at
+`analyze` even once its `confidence_label` already looks conclusive — a
+verified report, not the raw `analyze` JSON, is the deliverable, and every
+answer must be backed by it (see "Before handing a report to the user"
+below).
 
 ```
 uv run curiosity-radar resolve --topic "<text>" --languages <codes> --save-as <slug>
@@ -51,21 +64,57 @@ exit code alone.
 `cluster.articles[lang].exists` for every requested language.
 - `ambiguous: true` → don't guess which `candidates` entry is right; ask
   the user to pick, or rerun with an explicit `--qid`.
-- A language with `exists: false` → that language has no article for this
-  topic (no sitelink, or the sitelink's title doesn't resolve). It's
-  silently skipped by every later command — tell the user which
+- A language with `exists: false, reason: "no_sitelink"` → don't stop there
+  and just report the language as unavailable. Check `suggested_qids`
+  first: it's populated exactly when another Wikidata entity from the same
+  topic search covers more of the requested languages than `resolved_qid`
+  does. If it's non-empty, tell the user which QID/label would add which
+  language(s) (`additional_languages`) and offer to rerun `resolve --qid
+  <that QID>` — never switch `resolved_qid` automatically, this is a
+  proposal, exactly like `candidates` during an ambiguous match.
+  `suggested_qids` empty means no better alternative was found among the
+  candidates actually searched; only then tell the user the language was
+  dropped and why.
+- A language with `exists: false` for any other reason (the sitelink's
+  title doesn't resolve) → that language has no article for this topic.
+  It's silently skipped by every later command — tell the user which
   language(s) got dropped and why, don't let it pass unmentioned.
+- `related_search_terms` (up to 10 Wikidata aliases for the topic) is
+  worth mentioning to the user as alternate phrasings for a follow-up
+  `resolve --topic`, and is also carried into the PDF report's own
+  "Related search terms" section. It's alternate wording for the *same*
+  Wikipedia topic, not search-query volume or a user count — don't
+  present it as either.
 
 **After `analyze`**, before running `chart`/`report`: check each
 language's `data_quality.sufficient_for_trend`. If `false`
 (`"all_zero_or_empty"` or `"too_short"`, under 60 days), don't describe a
 trend for that language at all — say the data's insufficient and why.
 
-**Before handing a report to the user**: always run `verify` and check its
-`status`. `"failed_verification"` is blocking — rerun `report` (never
-hand-edit the PDF) and `verify` again. The report's own footer line is a
-fixed string, not a live check — it does not mean `verify` already passed
-(see `references/report-template.md`).
+**Before handing a report to the user**: every answer to the user's
+question must be backed by a `report` that has passed `verify` — don't
+answer straight from `analyze`'s output alone, even if its
+`confidence_label` seems clear enough on its own. Always run `verify` and
+check its `status`. `"failed_verification"` is blocking — rerun `report`
+(never hand-edit the PDF) and `verify` again. The report's own footer
+line is a fixed string, not a live check — it does not mean `verify`
+already passed (see `references/report-template.md`).
+
+## Persistent rate-limiting: don't retry forever
+
+A single `rate_limited` error from `resolve`/`fetch` is often transient —
+wait a bit and retry once. But if it recurs across a **few genuinely
+spaced-out retries spanning several minutes** (not a tight loop — real
+waiting), stop retrying and tell the user Wikimedia is currently
+unreachable from this environment. Then, if `resolve` has succeeded at
+least once for this project (so its articles are on file even if `fetch`
+never completed), run `uv run curiosity-radar bootstrap-script --project
+<slug>` and hand the user the generated script plus its `instructions`
+field verbatim — it lets them fetch the same data from their own machine
+(stdlib-only, no install needed) and hand back a `cache/` folder that
+lets `fetch` finish with zero further network calls. Full detail,
+including what to do if `resolve` itself never once succeeded:
+`references/error-catalog.md`'s "Persistent rate-limiting" section.
 
 ## Follow-ups without starting cold
 
@@ -95,8 +144,8 @@ steps are still needed. Full detail: `references/caching.md`.
 
 - `references/error-catalog.md` — every `error.code` this skill can
   return, plus the non-fatal "soft failure" signals (`ambiguous`,
-  `exists: false`, `sufficient_for_trend: false`, a `verify` mismatch) and
-  what `verify` does and doesn't catch.
+  `exists: false`, `suggested_qids`, `sufficient_for_trend: false`, a
+  `verify` mismatch) and what `verify` does and doesn't catch.
 - `references/stats-methods.md` — exact thresholds behind every
   `confidence_label` and the placebo verdict tiers, plus known
   methodological limitations (weekly autocorrelation, the placebo-basket

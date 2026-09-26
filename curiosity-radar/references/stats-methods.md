@@ -95,23 +95,64 @@ would otherwise masquerade as topic-specific trend — this is why every
 not a raw view count, and why the report's Assumptions box states this
 explicitly (`SPEC.md` §6).
 
-## Placebo test (`stats/placebo.py`)
+## Placebo test (`stats/placebo.py` + `wikimedia/basket_source.py` + `cache/basket.py`)
 
-**Scope, stated plainly:** this module is the pure statistical core only —
-`select_basket` filters a *caller-supplied* candidate pool (title +
+**Scope, stated plainly:** `stats/placebo.py` is the pure statistical core
+only — `select_basket` filters a *caller-supplied* candidate pool (title +
 average daily views + Wikidata category QIDs); `compute_verdict`
 percentile-ranks a topic's slope against a list of *already-computed*
-basket slopes. **Actually sourcing that candidate pool live from Wikimedia
-is not implemented** (`SPEC.md` §9 item 1 is still an open question,
-`api-notes.md` §1.3 notes the AQS "top articles" endpoint isn't wired in
-for exactly this reason) — `analyze.py` currently calls `compute_verdict`
-with an **empty** basket every time, so **every placebo verdict in this
-skill's output today reads "insufficient comparison data... found 0."**
-This is honest (never a fabricated percentile, never a bare `null`), but
-it means the placebo confidence signal `SPEC.md` §5 describes as the
-"most persuasive, legible" headline metric isn't actually live yet — lean
-on the Theil-Sen/Mann-Kendall `confidence_label` instead until a basket
-source exists.
+basket slopes. Neither function touches the network.
+
+**Basket sourcing (Milestone 13, `SPEC.md` §9 item 1 resolved):** the
+candidate pool itself is now sourced live, during `fetch` (never during
+`analyze` — SPEC.md §2's "analyze never touches the network" holds):
+
+1. AQS's "top articles" endpoint (`api-notes.md` §1.3, `[UNVERIFIED-LIVE]`
+   — never exercised in Milestone 0) gives a wiki's most-viewed articles
+   for one day — `wikimedia/basket_source.reference_day` picks the last
+   day of the most recently *closed* month, to avoid the still-settling
+   current month. Non-article noise (the Main Page, `Special:`/`Talk:`/etc.
+   namespaced pages) is filtered out (`is_candidate_title`).
+2. Each surviving candidate's Wikidata item is looked up by `(site,
+   title)` — one `wbgetentities` call per title (batching several via
+   `sites=...&titles=a|b|c` was never exercised live and its response
+   can't be reliably mapped back to each title without an extra,
+   unverified assumption, so it's deliberately not batched). A title with
+   no Wikidata item at all is dropped from the pool.
+3. The result — up to `fetch.BASKET_POOL_SIZE` (**20** by default, this
+   implementation's own tunable choice, not a frozen `SPEC.md` constant)
+   candidate titles + their category QIDs — is cached under
+   `cache/basket/<wiki>.json` (`cache/basket.py`), refreshed at most once
+   per calendar month per wiki: a Wikidata lookup per candidate isn't
+   cheap enough to repeat on every `fetch`, and which articles are
+   currently popular doesn't meaningfully change day to day. Keyed by wiki
+   only, not by project — the same "overlapping requests naturally share
+   files" reasoning `SPEC.md` §4 already applies to raw pageview data.
+4. Each candidate's own pageview *series* is fetched the ordinary way
+   (`cache/store.ensure_series`, same closed/open-month caching as any
+   project article) — a candidate is just another cached article.
+
+**`analyze` then does the real comparison:** reads `cache/basket/<wiki>.json`
+plus each candidate's cached series (never the network), computes each
+candidate's own normalized Theil-Sen slope the same way it computes the
+topic's, and calls `select_basket`/`compute_verdict` with the real result.
+A project whose wiki has no `cache/basket/` file yet (never `fetch`ed with
+basket sourcing enabled, or predating Milestone 13) simply gets an empty
+candidate list — the same honest "insufficient comparison data... found 0"
+verdict Milestone 6 always produced, never a crash on an old cache.
+
+**Category exclusion, in practice:** `SPEC.md` §5 says "excluding the
+topic's Wikidata category tree," but no single Wikidata property is
+literally named that, and `P910` ("topic's main category" — the closest
+literal match) is sparsely populated in practice. This implementation uses
+`P31`/`P279` ("instance of"/"subclass of") instead — populated on almost
+every item, and a plainly reasonable practical stand-in for "what kind of
+thing this topic is," which is what basket exclusion actually needs. Fetched
+once per topic, in the same `wbgetentities` call `resolve` already makes
+for sitelinks (`props=sitelinks|claims`, not a second round-trip), and
+persisted on the saved project as `cluster.category_qids`. This
+implementation's own choice, not a frozen `SPEC.md` threshold — see
+`wikidata_client.category_qids_from_entity`'s docstring.
 
 `select_basket`: eligible = within `POPULARITY_TIER_ORDERS_OF_MAGNITUDE`
 (**1**) order of magnitude of the topic's own average daily views, **and**

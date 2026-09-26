@@ -22,8 +22,39 @@ presence of an `error` key, not the exit code alone.
 | `no_report_found` | `verify` | No `--pdf` given and the project has never run `report` (`last_report_pdf_path` unset). | Run `report` first, or pass `--pdf` explicitly. |
 | `pdf_not_found` | `verify` | A resolved PDF path (explicit or recorded) doesn't exist on disk. | Rerun `report`, or pass the correct `--pdf` path. |
 | `network_error` | `resolve`, `fetch` | A `httpx.TransportError` (DNS, connection refused, TLS) reaches the shared client — i.e. the request never got a response at all. | Check connectivity; already-cached closed months/resolved languages are still usable. |
-| `rate_limited` | `resolve`, `fetch` | A `429`/`500`/`502`/`503`/`504` response survives `wikimedia/http.py`'s bounded retry (3 attempts, exponential backoff + jitter) without ever succeeding. | Wait a minute and retry — already-cached/resolved data is unaffected. |
+| `rate_limited` | `resolve`, `fetch` | A `429`/`500`/`502`/`503`/`504` response survives `wikimedia/http.py`'s bounded retry (3 attempts, exponential backoff + jitter) without ever succeeding. | Wait a minute and retry — already-cached/resolved data is unaffected. See "Persistent rate-limiting" below if it keeps happening across several genuinely spaced-out retries. |
+| `project_not_resolved` | `bootstrap-script` | The `--project` slug exists but has zero resolved articles (`resolve` never succeeded for it, or every language came back `exists: false`). | Run `resolve --save-as` first — `bootstrap-script` needs at least one language's real article/QID on file, even if `fetch` itself never completed. |
 | `internal_error` | any command (CLI-level catch-all) | Anything not covered above (a real bug, an unexpected exception shape). Full traceback written to `<data-dir>/logs/<timestamp>.log`. | Check the log file. |
+
+### Persistent rate-limiting: when to stop retrying and escalate
+
+A single `rate_limited` is often transient — the documented "wait a minute
+and retry" is the right first move. But some environments sit behind a
+shared/heavily-used egress IP where Wikimedia's `429` `retry-after` header
+does not shrink between attempts, it *grows* (observed directly: 14s, then
+37s, after two spaced-out retries) — waiting longer makes no progress
+because the shared IP stays under load regardless of how long any one
+session waits. `SKILL.md` tells the agent: after a genuine second or third
+`rate_limited` spread across a few minutes of real waiting (not a tight
+retry loop), stop retrying resolve/fetch entirely and:
+
+1. Tell the user plainly that Wikimedia is currently unreachable from this
+   environment — this is an environment/network condition, not a bug in
+   the skill or a sign the topic/languages were wrong.
+2. If `resolve` has *ever* succeeded for this project (even once, even
+   before `fetch` started hitting the limit) — run `bootstrap-script
+   --project <slug>` and hand the user the generated script + its
+   `instructions` verbatim: they run it on a machine with normal internet
+   access (stdlib-only, no `uv`/`git`/pip installs needed), it writes
+   `cache/raw/...` in the exact layout `fetch` itself would have produced,
+   they zip and return `cache/`, and dropping that into `<data-dir>/cache/`
+   lets `fetch` pick up every closed month with zero further network calls.
+3. If `resolve` itself has never once succeeded, there is no project to
+   bootstrap from — say so, and either wait longer before retrying `resolve`
+   (its own request volume is far smaller than `fetch`'s, so it succeeds
+   far more often even when `fetch` is thoroughly blocked) or ask the user
+   if they already know the exact Wikidata QID / per-language article
+   titles, so `resolve --qid ...` can skip the search step that's failing.
 
 **Two gaps closed while writing this doc (Milestone 10):** `SPEC.md` §7
 always documented a clean `rate_limited` error, but neither `resolve.py`
@@ -48,7 +79,8 @@ mode is real, but per-item/per-language, not fatal to the whole command.
 | Signal | Where | Meaning |
 |---|---|---|
 | `"ambiguous": true` + populated `candidates` | `resolve` | Multiple Wikidata entities share the exact search label. Don't guess — surface `candidates` to the user and ask them to pick, or rerun with an explicit `--qid`. |
-| `cluster.articles[lang].exists: false, reason: "no_sitelink"` | `resolve` | The resolved QID has no sitelink for that language's wiki. That language is silently skipped by every downstream command (`fetch` warns and skips it; `analyze`/`chart` never see it via `resolved_articles()`). |
+| `cluster.articles[lang].exists: false, reason: "no_sitelink"` | `resolve` | The resolved QID has no sitelink for that language's wiki. That language is silently skipped by every downstream command (`fetch` warns and skips it; `analyze`/`chart` never see it via `resolved_articles()`) — **unless** `suggested_qids` (below) offers a better QID. |
+| Populated `suggested_qids` | `resolve` | Only computed when a `no_sitelink` gap exists above. Another entity from the same topic search (`candidates`) has a formal sitelink for one or more of the requested languages that `resolved_qid` lacks (`additional_languages`). Same status as `candidates` during an `ambiguous` match: a proposal, never an automatic substitution — `SKILL.md` tells the agent to check this before telling the user a language has no coverage. `--qid` (search skipped) never populates `candidates`, so never populates this either. |
 | `cluster.articles[lang].exists: false, reason: "page_missing" \| "page_not_found"` | `resolve` | The sitelink's title doesn't resolve to a real page on that wiki (deleted/never existed post-sitelink). Same downstream skip behavior as `no_sitelink`. |
 | `data_quality.sufficient_for_trend: false, reason: "all_zero_or_empty" \| "too_short"` | `analyze` | Fewer than `MIN_DAYS_FOR_TREND` (60) days of data, or every day is zero. `normalized_trend`/`trend_excluding_spikes` come back as a fixed "insufficient data" placeholder (`theil_sen_slope_per_day: 0.0`, `mann_kendall.trend: "no trend"`) rather than a fabricated number — never treat those as real when `sufficient_for_trend` is false. |
 | `placebo.verdict` starting with `"insufficient comparison data..."` | `analyze` | Fewer than `MIN_ELIGIBLE_FOR_VERDICT` (10) basket members. **Always true today** — no live basket-sourcing mechanism exists yet (`SPEC.md` §9 item 1, `PLAN.md` Milestone 5/6), so the candidate pool `analyze` passes in is always empty. Don't present the placebo percentile as a real confidence signal until this is wired up; lean on the Theil-Sen/Mann-Kendall confidence label instead. |

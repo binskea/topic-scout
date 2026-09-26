@@ -6,3 +6,6 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .curiosity-radar/
+# Per-run eval working data (regenerable from evals/cassettes/ + cassette/fake-today
+# env vars) — only the transcripts + rendered PDF are the human-review artifact.
+curiosity-radar/evals/results/*/data/

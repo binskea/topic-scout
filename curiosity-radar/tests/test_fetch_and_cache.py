@@ -23,6 +23,7 @@ import pytest
 from _cassette import SequentialCassette
 
 from curiosity_radar import project_state
+from curiosity_radar.cache import basket as basket_cache
 from curiosity_radar.cache import store
 from curiosity_radar.commands import fetch as fetch_cmd
 from curiosity_radar.errors import CommandError
@@ -395,6 +396,129 @@ def test_persistent_rate_limit_is_a_clean_error(
             data_dir=tmp_path,
         )
     assert exc_info.value.code == "rate_limited"
+
+
+def test_basket_sourcing_populates_cache_once_per_month_and_fetches_candidate_series(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Milestone 13: `fetch` sources+caches each fetched wiki's placebo-
+    basket candidate pool (`cache/basket/<wiki>.json`) at most once per
+    calendar month, filtering out non-article "top articles" noise (here,
+    `Main_Page`) and titles with no Wikidata item at all, then fetches each
+    surviving candidate's own pageview series the ordinary way. A second
+    fetch within the same month must not re-source (no repeat top-articles/
+    Wikidata calls) but must still refetch each candidate's still-open
+    current month, same as any ordinary article."""
+    monkeypatch.setenv("CURIOSITY_RADAR_FAKE_TODAY", "2025-03-20")
+    monkeypatch.setattr(fetch_cmd, "BASKET_POOL_SIZE", 2)
+
+    _make_project(
+        tmp_path,
+        slug="demo",
+        lang="en",
+        article=ArticleInfo(title="Intermittent_fasting", wiki="en.wikipedia", exists=True),
+        start="2025-03-01",
+        end="2025-03-20",
+    )
+
+    top_articles_response = {
+        "items": [
+            {
+                "project": "en.wikipedia",
+                "access": "all-access",
+                "year": "2025",
+                "month": "02",
+                "day": "28",
+                "articles": [
+                    {"article": "Main_Page", "views": 999999, "rank": 1},
+                    {"article": "Some_Popular_Article", "views": 5000, "rank": 2},
+                    {"article": "Another_Article", "views": 4000, "rank": 3},
+                ],
+            }
+        ]
+    }
+
+    first_cassette = SequentialCassette(
+        [
+            (
+                "/per-article/en.wikipedia/all-access/user/Intermittent_fasting/daily/"
+                "20250301/20250320",
+                {"items": []},
+            ),
+            ("/aggregate/en.wikipedia/all-access/user/daily/20250301/20250320", {"items": []}),
+            ("/top/en.wikipedia/all-access/2025/02/28", top_articles_response),
+            (
+                {"action": "wbgetentities", "sites": "enwiki", "titles": "Some_Popular_Article"},
+                {
+                    "entities": {
+                        "Q100": {
+                            "id": "Q100",
+                            "claims": {
+                                "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q5"}}}}]
+                            },
+                        }
+                    }
+                },
+            ),
+            (
+                {"action": "wbgetentities", "sites": "enwiki", "titles": "Another_Article"},
+                {"entities": {"enwiki:Another_Article": {"missing": ""}}},
+            ),
+            (
+                "/per-article/en.wikipedia/all-access/user/Some_Popular_Article/daily/"
+                "20250301/20250320",
+                {"items": []},
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, first_cassette)
+    result = fetch_cmd.run(
+        project="demo",
+        topic=None,
+        languages=None,
+        start=None,
+        end=None,
+        granularity="daily",
+        data_dir=tmp_path,
+    )
+    first_cassette.assert_exhausted()
+
+    # Main_Page filtered out, Another_Article has no Wikidata item -> only
+    # Some_Popular_Article survives.
+    assert result.fetched.basket_candidates_sourced == 1
+    meta = basket_cache.load(tmp_path, "en.wikipedia")
+    assert meta is not None
+    assert meta.sourced_month == "2025-03"
+    assert [c.title for c in meta.candidates] == ["Some_Popular_Article"]
+    assert meta.candidates[0].category_qids == ["Q5"]
+
+    second_cassette = SequentialCassette(
+        [
+            (
+                "/per-article/en.wikipedia/all-access/user/Intermittent_fasting/daily/"
+                "20250301/20250320",
+                {"items": []},
+            ),
+            ("/aggregate/en.wikipedia/all-access/user/daily/20250301/20250320", {"items": []}),
+            (
+                "/per-article/en.wikipedia/all-access/user/Some_Popular_Article/daily/"
+                "20250301/20250320",
+                {"items": []},
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, second_cassette)
+    result2 = fetch_cmd.run(
+        project="demo",
+        topic=None,
+        languages=None,
+        start=None,
+        end=None,
+        granularity="daily",
+        data_dir=tmp_path,
+    )
+    second_cassette.assert_exhausted()
+    assert result2.fetched.basket_candidates_sourced == 0
 
 
 def test_fake_today_env_var_pins_which_month_is_treated_as_open(

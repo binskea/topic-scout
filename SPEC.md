@@ -21,6 +21,21 @@ turned out to be wrong (it's "Bibliography," not the intended topic) — all
 examples below now use an explicit `Q_EXAMPLE` placeholder, and `resolve`
 must always look up QIDs live, never hardcode one.
 
+**Updated 2026-09-25 (Milestone 16 — related search terms; renumbered in
+the consolidation pass, see §3.1's note below):** `resolve`
+now also returns `related_search_terms` (§3.1) — up to 10 Wikidata
+aliases ("also known as" labels) for the resolved topic, in the languages
+requested, deduped against the topic query and every already-resolved
+article/redirect title. This is sourced from a `props=aliases` addition to
+the same `wbgetentities` call `resolve` already makes for sitelinks (see
+`references/api-notes.md` §2.2) — no new endpoint. It's persisted on
+project state and surfaced as a new "Related search terms" section in the
+one-page PDF report (§6), but is explicitly **not** one of `verify`'s
+numeric claims (§3.6) — it's descriptive text, deterministic and sourced
+from stored state like `assumptions_text`, not a number/date fact to
+cross-check. This is deliberately *not* the same thing as search-query
+volume or a count of users who searched — see §8's restated limitation.
+
 ## 1. Directory layout
 
 ```
@@ -38,11 +53,13 @@ curiosity-radar/
 │   │   ├── chart.py                  # renders chart image files
 │   │   ├── report.py                 # renders the one-page PDF
 │   │   ├── verify.py                 # checks rendered report numbers vs. computed JSON
-│   │   └── project.py                # list/show/set/fork saved project state
+│   │   ├── project.py                # list/show/set/fork saved project state
+│   │   └── bootstrap_script.py       # generates a local, stdlib-only fetcher for a rate-limited resolve/fetch (§3.8)
 │   ├── wikimedia/
-│   │   ├── wikidata_client.py        # search, sitelinks
+│   │   ├── wikidata_client.py        # search, sitelinks, entity claims (category QIDs)
 │   │   ├── mediawiki_client.py       # title normalization, redirect resolution
-│   │   ├── aqs_client.py             # per-article + aggregate pageviews
+│   │   ├── aqs_client.py             # per-article + aggregate + top-articles pageviews
+│   │   ├── basket_source.py          # live placebo-basket candidate sourcing (Milestone 13)
 │   │   └── http.py                   # shared httpx client: retries, backoff, User-Agent
 │   ├── stats/
 │   │   ├── trend.py                  # Theil-Sen + Mann-Kendall
@@ -55,7 +72,8 @@ curiosity-radar/
 │   │   ├── fpdf2_renderer.py
 │   │   └── template.html             # HTML/CSS layout used by the WeasyPrint path
 │   ├── cache/
-│   │   ├── store.py                  # cache key scheme, read/write, closed-month logic
+│   │   ├── store.py                  # raw-pageview cache key scheme, read/write, closed-month logic
+│   │   ├── basket.py                 # per-wiki placebo-basket candidate metadata cache (Milestone 13)
 │   │   └── paths.py                  # resolves the runtime data dir (see below)
 │   ├── project_state.py              # load/save/mutate the project/session file
 │   ├── clock.py                      # "today" seam — real wall time, or CURIOSITY_RADAR_FAKE_TODAY for evals (Milestone 11)
@@ -124,6 +142,8 @@ than starting cold.
 │   ├── raw/
 │   │   └── <project>/<article-or-aggregate>/<granularity>/<YYYY-MM>.json   # one file per closed month, immutable
 │   │   └── <project>/<article-or-aggregate>/<granularity>/current.json    # always-refetched partial period
+│   ├── basket/
+│   │   └── <wiki>.json                                          # placebo-basket candidate pool, resourced monthly (Milestone 13)
 │   └── derived/
 │       └── <schema-version>/<project-slug>/<analysis-hash>.json # cached stats results (see §4)
 ├── charts/
@@ -225,16 +245,57 @@ hardcodes one.
       "pl": {"title": "Głodówka przerywana", "wiki": "pl.wikipedia", "redirect_from": null, "exists": true},
       "cs": {"title": "Přerušovaný půst", "wiki": "cs.wikipedia", "redirect_from": "Intermitentní půst", "exists": true},
       "uk": {"wiki": "uk.wikipedia", "exists": false, "reason": "no_sitelink"}
-    }
+    },
+    "category_qids": ["Q_EXAMPLE_CAT"]
   },
-  "warnings": ["uk: no Wikidata sitelink for this QID"]
+  "suggested_qids": [{"qid": "Q_NEIGHBOR", "label": "intermittent fasting (diet)", "description": "...", "additional_languages": ["uk"]}],
+  "warnings": ["uk: no Wikidata sitelink for this QID"],
+  "related_search_terms": ["intermittent-fasting", "16:8 diet", "time-restricted eating"]
 }
 ```
+`related_search_terms` (Milestone 16 — renumbered in the consolidation
+pass; also originally labeled "Milestone 13", same collision as
+Milestones 14/15's notes; no code overlap — this touches only the shared
+`wbgetentities` call's `props`/`languages` params and its own extraction
+function): up to 10 Wikidata aliases for
+`resolved_qid`, pooled across `"en"` plus every requested language,
+deduped case-insensitively, excluding anything equal to `topic_query` or
+to any resolved article/redirect title. Empty when the entity has no
+aliases in the requested languages — not an error, just nothing new to
+suggest. These are alternate phrasings of the *same* Wikipedia topic for a
+follow-up `resolve --topic`, not a market-research synonym list and not
+search-query data (see §8).
 `candidates` has no numeric relevance score — real `wbsearchentities`
 responses don't return one (confirmed in Milestone 0). Ambiguity is
 conveyed by list order (server-ranked) plus `match_type` (`"label"` vs.
 `"alias"`); an invented `score` field from an earlier draft has been
 removed.
+
+`cluster.category_qids` (Milestone 13): the topic QID's own "instance of"/
+"subclass of" claims (P31/P279), fetched in the same `wbgetentities` call as
+`sitelinks` (one `props=sitelinks|claims` request, not an extra round-trip).
+Persisted on the saved project and used by `analyze`'s placebo test (§5,
+§9 item 1) to exclude thematically related articles from the comparison
+basket — see `references/stats-methods.md` for why P31/P279 rather than a
+literal "category" property.
+
+**`suggested_qids`** (Milestone 15 — renumbered in the consolidation pass;
+built independently and also originally labeled "Milestone 13", with no
+code overlap against the other two same-numbered milestones above):
+populated only when `resolved_qid` has a `no_sitelink` gap in at least one
+requested language. When that
+happens, `resolve` checks the *other* entries already returned by the same
+topic search (`candidates`, no new API surface) for their own sitelink
+coverage of the requested languages; any candidate covering strictly more
+of them than `resolved_qid` is surfaced here with the specific
+`additional_languages` it would add. This is a proposal only, never an
+automatic substitution — same relationship `candidates` has to `resolved_qid`
+when `ambiguous` — the agent decides whether to rerun `resolve --qid
+<suggestion>`. `--qid` (search skipped) yields no `candidates` and
+therefore no `suggested_qids` either. See §9 item 2 for why this isn't the
+weaker "cross-wiki title search without a sitelink" that was already
+rejected for v1: every suggested QID still has its own formal Wikidata
+sitelink, it's simply a different entity than the one first resolved.
 
 **Redirect aliases are tracked separately by AQS pageviews** — confirmed in
 Milestone 0, a redirect title (e.g. `cs`'s `Intermitentní půst` above)
@@ -263,7 +324,7 @@ last 730 days, clamped with a warning to AQS's actual earliest date — see
 ```json
 {
   "project": "intermittent-fasting-pl-cs",
-  "fetched": {"articles_fetched": 2, "redirect_aliases_fetched": 1, "days_requested": 730, "days_from_cache": 700, "days_freshly_fetched": 30, "http_requests_made": 4},
+  "fetched": {"articles_fetched": 2, "redirect_aliases_fetched": 1, "days_requested": 730, "days_from_cache": 700, "days_freshly_fetched": 30, "http_requests_made": 4, "basket_candidates_sourced": 0},
   "coverage": {
     "pl": {"wiki": "pl.wikipedia", "article": "Głodówka przerywana", "redirect_alias_included": null, "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 4},
     "cs": {"wiki": "cs.wikipedia", "article": "Přerušovaný půst", "redirect_alias_included": "Intermitentní půst", "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 1}
@@ -277,6 +338,12 @@ canonical title alone (`null`) or canonical + one summed redirect alias
 can state plainly whether redirect traffic was folded in for that
 language.
 No raw daily arrays in stdout — those live only in `cache/raw/`.
+
+`fetched.basket_candidates_sourced` (Milestone 13): how many placebo-basket
+candidates were freshly sourced+cached this run for the project's wiki(s)
+— `0` on any call that hits an already-this-month-sourced `cache/basket/`
+file (the common case; sourcing happens at most once per wiki per calendar
+month). See `references/stats-methods.md` and `references/caching.md`.
 
 ### 3.3 `analyze`
 Compute normalization, Theil-Sen/Mann-Kendall trend (with-spikes and
@@ -338,7 +405,7 @@ auto|weasyprint|fpdf2` (default `auto` — see §6).
   "pdf_path": "<data-dir>/reports/intermittent-fasting-pl-cs_2026-09-22.pdf",
   "engine_used": "weasyprint",
   "page_count": 1,
-  "sections_rendered": ["summary", "trend_chart_pl", "trend_chart_cs", "confidence", "assumptions", "limitations"],
+  "sections_rendered": ["summary", "trend_chart_pl", "trend_chart_cs", "confidence", "related_search_terms", "assumptions", "limitations"],
   "numeric_claims_count": 14
 }
 ```
@@ -395,6 +462,50 @@ Subcommands: `project list`; `project show --project <slug>`; `project set
 when languages/date-range widened beyond cached coverage), so `SKILL.md`
 can tell the agent exactly which of `fetch`/`analyze`/`chart`/`report` it
 actually needs to rerun rather than always running the full chain.
+
+### 3.8 `bootstrap-script`
+Generates a self-contained, stdlib-only local pageview fetcher for a saved
+project's already-resolved articles — the concrete answer to §9 item 8's
+"accept manual paste-back as a standing, documented process" option (b),
+built as a real, tested command rather than an ad hoc one-off script.
+`SKILL.md`/`references/error-catalog.md`'s "Persistent rate-limiting"
+section tells the agent when to reach for this: after `resolve`/`fetch`
+keep returning `rate_limited` across a few genuinely spaced-out retries
+(real environment egress issue observed directly on 2026-09-25: a shared
+egress IP's `429` `retry-after` header *grew* across successive waits —
+14s, then 37s — rather than shrinking, so waiting longer made no
+progress).
+
+Inputs: `--project <slug>` (must have at least one language with a
+resolved article on file — `fetch` itself need never have succeeded),
+`--data-dir`.
+
+```json
+{
+  "project": "intermittent-fasting-pl-cs",
+  "script_path": "<data-dir>/scripts/intermittent-fasting-pl-cs_local_fetch.py",
+  "languages": ["pl", "cs"],
+  "articles_covered": 3,
+  "date_range": {"start": "2024-09-25", "end": "2026-09-25"},
+  "instructions": ["Copy the script to a machine with normal internet access...", "..."]
+}
+```
+`articles_covered` counts one entry per (wiki, title) the script fetches —
+a language with a redirect alias (`resolve`'s `redirect_from`) contributes
+two, matching `fetch`'s own canonical + redirect-alias summation. The
+generated script deliberately **duplicates** (never imports)
+`cache/store.py`'s month-key/closed-month/zero-fill logic and
+`wikimedia/aqs_client.py`'s URL-building — the same "mirror, not reuse"
+approach `evals/generate_cassettes.py` already takes, for the same reason:
+it must run with zero project dependencies (stdlib only) on a machine that
+may have neither `uv` nor this repo installed. Its cache output lands in
+`./cache/raw/...` in exactly `cache/store.py`'s own layout/schema
+(`tests/test_bootstrap_script.py` proves this end to end: run the
+generated script's logic against a faked network, copy its `cache/`
+output into a real data-dir, and assert a real `fetch --project ...`
+makes zero HTTP requests for the now-cached closed month), so once the
+user hands back a zipped `cache/` folder and it's merged into
+`<data-dir>/cache/`, `fetch` treats every closed month as already fetched.
 
 ## 4. Caching strategy
 
@@ -464,17 +575,24 @@ Section order, top to bottom:
    spike-adjusted verdict, placebo percentile, data-quality flag.
 5. **Cross-language ranking** (multi-language asks only) — small bar chart
    or ranked list answering "which language/audience to prioritize."
-6. **Assumptions** — boxed, same visual weight as body text (never
+6. **Related search terms (top 10)** (Milestone 16) — `resolve`'s
+   `related_search_terms`, persisted on project state, joined into one
+   line; a plain "no alternate phrasings found" note (never a silent
+   omission, same graceful-degradation posture as a coverage warning
+   elsewhere in this doc) when the topic has none in the requested
+   languages. Boxed like Assumptions/Limitations, not claim-panel styled —
+   it's descriptive text, not one of `verify`'s numeric claims.
+7. **Assumptions** — boxed, same visual weight as body text (never
    footnote-sized): normalization method, `agent=user` filter, date range
    actually used post-exclusions, placebo basket size, redirect resolution
    applied and whether a redirect alias's traffic was folded into the
    count for each language (per `fetch`'s `redirect_alias_included`).
-7. **Limitations** — equally prominent: pageview data reflects Wikipedia
+8. **Limitations** — equally prominent: pageview data reflects Wikipedia
    readership only, not search demand or purchase intent; short/noisy
    series near AQS's start date are unreliable; topic-to-article mapping
    may be imperfect for ambiguous topics; normalized (not raw) counts are
    shown.
-8. **Footer** — the `verify` command's PASS/FAIL stamp printed literally
+9. **Footer** — the `verify` command's PASS/FAIL stamp printed literally
    ("Numeric claims verified against source data: PASS"), so the
    anti-hallucination check is visibly attached to the artifact, not just
    asserted.
@@ -520,7 +638,19 @@ General rule baked into `SKILL.md`: every command's JSON has a top-level
 
 - Pageview data reflects Wikipedia readership only — not search demand,
   app-store demand, or purchase intent; it's a proxy signal for "where to
-  look next," not a market-sizing tool.
+  look next," not a market-sizing tool. Nothing in this design can answer
+  "how many users searched for X" or "peak concurrent searchers" — AQS
+  exposes page *view* counts (with a bot-filtered `agent=user`, still not a
+  unique-visitor count), never search-query volume or a unique-searcher
+  count, and no such data is publicly published by Wikimedia at all. The
+  closest honest proxy already in this design is a single day's peak
+  normalized share of traffic (surfaced via `analyze`'s MAD spike
+  detection, §5) — real views, not users, and not search intent.
+- `related_search_terms` (§3.1, Milestone 16) is Wikidata's own alias list
+  for the resolved topic, not a market-research synonym/keyword-demand
+  tool — coverage varies a lot by topic and language (a well-curated
+  entity may have many aliases, an obscure one none), and an empty list
+  means no aliases were recorded, not that no alternate phrasings exist.
 - Short or noisy series near AQS's actual history start date
   (`[UNVERIFIED-LIVE]`, believed ~2015-07) are unreliable; `fetch` clamps
   over-long requested ranges and warns rather than silently truncating.
@@ -551,9 +681,19 @@ happened.
    **Resolved (Milestone 5):** yes, 10 (`stats/placebo.py`'s
    `MIN_ELIGIBLE_FOR_VERDICT`) — below that, `compute_verdict` returns an
    explicit "insufficient comparison data" verdict rather than a noisy
-   percentile. Caveat carried forward, not new: no live basket-*sourcing*
-   mechanism exists yet (Milestone 6's own scope boundary), so this
-   threshold is currently always hit — see `references/stats-methods.md`.
+   percentile.
+   **Basket sourcing itself resolved (Milestone 13):** `fetch` now sources
+   a wiki's candidate pool live (AQS "top articles" + a per-title Wikidata
+   lookup for category QIDs, `wikimedia/basket_source.py`), cached under
+   `cache/basket/<wiki>.json` at most once per calendar month
+   (`cache/basket.py`); `analyze` reads that cache plus each candidate's
+   own pageview series (never the network) to compute real basket slopes.
+   A project whose wiki predates this milestone (or was fetched with
+   basket sourcing disabled) still degrades to the always-"insufficient"
+   path Milestone 6 shipped — not an error, just no basket yet. See
+   `references/stats-methods.md` for the sourcing mechanism and why P31/
+   P279 claims stand in for "the topic's Wikidata category tree" (no
+   single Wikidata property is literally named that).
 2. **No Wikidata sitelink for a requested language.** Current design skips
    that language with a warning (graceful degradation). An alternative —
    falling back to a cross-wiki title search without a formal sitelink — is
@@ -563,6 +703,14 @@ happened.
    fallback search, `exists: false, reason: "no_sitelink"`, downstream
    commands skip the language with a warning. `references/error-catalog.md`
    documents this as a "soft failure," not an error.
+   **Extended (Milestone 15):** the rejected "weaker" option above was
+   specifically a cross-wiki title search with no formal sitelink. `resolve`
+   now additionally checks the topic-search `candidates` it already fetched
+   (still each a real Wikidata entity with its own formal sitelinks, not a
+   new/weaker search) for their language coverage, and surfaces any that
+   cover more requested languages than `resolved_qid` in `suggested_qids`
+   (§3.1) — a proposal `SKILL.md` tells the agent to check before reporting
+   a language as unavailable, never an automatic substitution.
 3. **AQS true history start date and over-long-range clamping.**
    `[UNVERIFIED-LIVE]` — confirm in Milestone 0, then clamp/warn rather than
    silently return less data than requested.
@@ -658,6 +806,24 @@ happened.
    rather than another manual live-handoff). Option (a) — an org/environment
    egress allowlist — remains a request for whoever administers this
    account's environments, outside what a coding session can grant itself.
+   **Update (Milestone 14, 2026-09-25):** option (b) is no longer just
+   "manual paste-back is acceptable" — it's now a first-class command,
+   `bootstrap-script` (§3.8), triggered automatically by `SKILL.md`'s
+   escalation policy rather than reconstructed ad hoc each time. Prompted
+   by hitting the identical live block again this session and confirming
+   it's genuinely a *shared-egress* condition, not a one-off: Wikidata's
+   `429` `retry-after` header grew across successive real waits (14s, then
+   37s) rather than shrinking, ruling out "just wait a fixed amount
+   longer" as a reliable fix. Still doesn't touch option (a).
+   **Update (Milestone 11's actual live run, 2026-09-25):** in the cloud
+   session that finally had `OPENROUTER_API_KEY` configured, egress to
+   `openrouter.ai` worked with no blocking — the earlier "same underlying
+   cause" read turned out to be per-environment/per-session, not a durable
+   account-wide OpenRouter block. Wikimedia/Wikidata egress itself was not
+   re-tested (Milestone 11 stays cassette-backed by design regardless), so
+   that half of this item is still genuinely open — but the OpenRouter
+   instance of it is resolved as of this run, and the eval no longer needs
+   deferring on that account.
 9. **PDF engine auto-detection edge cases.** `--engine auto`'s
    "importable at runtime" check for WeasyPrint needs to also probe that
    its *system* libraries (not just the Python package) actually load

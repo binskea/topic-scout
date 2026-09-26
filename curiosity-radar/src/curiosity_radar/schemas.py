@@ -45,6 +45,13 @@ class Candidate(StrictModel):
     match_type: Literal["label", "alias"]
 
 
+class SuggestedQid(StrictModel):
+    qid: str
+    label: str
+    description: str | None = None
+    additional_languages: list[str]
+
+
 class ArticleInfo(StrictModel):
     title: str | None = None
     wiki: str
@@ -57,6 +64,7 @@ class Cluster(StrictModel):
     primary_qid: str
     related_qids: list[str] = []
     articles: dict[str, ArticleInfo] = {}
+    category_qids: list[str] = []
 
 
 class ResolveResult(StrictModel):
@@ -65,7 +73,9 @@ class ResolveResult(StrictModel):
     candidates: list[Candidate] = []
     ambiguous: bool
     cluster: Cluster | None = None
+    suggested_qids: list[SuggestedQid] = []
     warnings: list[str] = []
+    related_search_terms: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +90,7 @@ class FetchedSummary(StrictModel):
     days_from_cache: int
     days_freshly_fetched: int
     http_requests_made: int
+    basket_candidates_sourced: int = 0
 
 
 class CoverageEntry(StrictModel):
@@ -242,3 +253,17 @@ class ProjectShowResult(StrictModel):
 
 class ProjectListResult(StrictModel):
     projects: list[ProjectShowResult] = []
+
+
+# ---------------------------------------------------------------------------
+# 3.8 bootstrap-script
+# ---------------------------------------------------------------------------
+
+
+class BootstrapScriptResult(StrictModel):
+    project: str
+    script_path: str
+    languages: list[str]
+    articles_covered: int
+    date_range: DateRange
+    instructions: list[str] = []

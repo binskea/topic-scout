@@ -475,7 +475,7 @@ scratch) Milestone 9's two follow-up flows in cache-key terms.
 Full suite (99 tests — 2 new since Milestone 9), `ruff check`, `ruff
 format --check`, and `mypy src/` all clean after this milestone.
 
-## Milestone 11 — Eval milestone — 🟡 infrastructure DONE 2026-09-23, blocked on a model key
+## Milestone 11 — Eval milestone — ✅ DONE 2026-09-25 (live run completed)
 
 **Definition of done:** the 3 `TASK.md` example queries run end to end,
 with the skill installed, on Claude Haiku 4.5 (or a cheap/free OpenRouter
@@ -496,12 +496,64 @@ what `SKILL.md` provides, (b) the final report's numeric claims pass
 drop the most recent spike") stays cheap (no unnecessary refetching) and
 produces a coherent updated answer.
 
-**Not fully met — stated plainly, not glossed over:** this dev session's
-environment has no `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` configured
-(confirmed by checking the environment directly), so no live model call has
-actually been made yet — there is no real transcript to review, and (c)
-above (a live same-session follow-up) has not been exercised end to end by
-an actual agent. The user chose the OpenRouter-free-model path (over
+**Update (2026-09-25) — the live run this section originally deferred has
+now happened, for real, not just claimed:** a later dev session had
+`OPENROUTER_API_KEY` configured. `DEFAULT_MODEL` in `run_scenarios.py`
+(`meta-llama/llama-3.3-70b-instruct:free`) had since been retired from
+OpenRouter's free tier (confirmed via `GET /api/v1/models` — not present);
+several other free models were also rate-limited/overloaded at call time.
+`inclusionai/ling-3.0-flash-sante:free` was confirmed live and
+tool-calling-capable and became the new default (`run_scenarios.py`
+comment records this so a future retirement is diagnosable the same way).
+
+All 3 `TASK.md` scenarios were run end to end against it, full transcripts
+under `evals/results/<slug>/` (`transcript.json` + human-readable
+`transcript.md`), plus a fourth artifact,
+`evals/results/02_astronomy_uk/followup_transcript.json`, from a real
+same-session follow-up turn. Human review against the 3 criteria:
+
+1. **Command sequence, no hand-holding — met, all 3 scenarios.** Each run
+   issued exactly the 6 intended commands (`resolve` → `fetch` → `analyze`
+   → `chart` → `report` → `verify`), nothing extra, no `read_reference`
+   calls needed — `SKILL.md` alone was sufficient.
+2. **`verify` passes — met, all 3 scenarios.** `01_intermittent_fasting_pl_cs`:
+   20/20 claims matched. `02_astronomy_uk`: 11/11. `03_english_learning_es_de_ja`:
+   29/29. Zero mismatches anywhere.
+3. **Same-session follow-up stays cheap and coherent — met, exercised for
+   real.** `run_scenarios.py` only sends the base prompt once, so a new
+   script, `evals/run_followup.py`, was written to reload a scenario's saved
+   `transcript.json` and continue the same conversation/`--data-dir` with a
+   new user turn (see `evals/README.md`'s "Trying a same-session follow-up"
+   section). Run against `02_astronomy_uk`, asking it to exclude the
+   detected spike and re-confirm the trend: the model called
+   `project set --exclude-date-range` (Milestone 9's cheap-mutation path)
+   then re-ran `analyze` → `chart` → `report` → `verify` — **no `fetch`
+   call** — reaching "All verified" again with an updated, coherent
+   before/after comparison (Mann-Kendall p-value tightened from 1.27e-147
+   to 4.52e-147 once the one noisy day was dropped). Not repeated for the
+   other two scenarios since the mechanism being tested
+   (`project set` + re-`analyze`, no `fetch`) is scenario-independent, not
+   scenario-specific behavior.
+
+A real gap surfaced and fixed along the way, not glossed over: OpenRouter
+can return HTTP 200 with an `{"error": {...}}` body (not `"choices"`) when
+a free-tier provider is overloaded — `_call_openrouter` previously died
+with a bare `KeyError: 'choices'` on this. Now raises `RuntimeError` with
+the actual provider message; covered by
+`tests/test_eval_harness_helpers.py::test_call_openrouter_raises_on_an_http_200_provider_error_body`
+(mocked, no live call). Full suite: 126 tests (1 new), `ruff`/`mypy` clean.
+
+SPEC.md §9 item 8 updated: the OpenRouter-egress half of that item is now
+resolved (this session's environment allowed it with no blocking); the
+Wikimedia/Wikidata-egress half stays open and untested, since Milestone 11
+was never meant to depend on it (cassette-backed by design).
+
+**Original note, kept for history:** this dev session's environment has no
+`ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` configured (confirmed by
+checking the environment directly), so no live model call has actually
+been made yet — there is no real transcript to review, and (c) above (a
+live same-session follow-up) has not been exercised end to end by an
+actual agent. The user chose the OpenRouter-free-model path (over
 Anthropic/Haiku 4.5) when asked; running it for real is a one-command step
 once a key is added (`evals/README.md`) — not a redesign.
 
@@ -554,12 +606,10 @@ just claimed):**
   a shell-metacharacter injection attempt — `&&`, tested against a marker
   file — cannot chain a second command).
 
-Full suite: 125 tests (26 new since Milestone 10), `ruff check`, `ruff
-format --check`, `mypy src/` all clean. **Next step, not this session's to
-take:** add an `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY` and adapt the
-harness's `_call_openrouter` to the Anthropic Messages API instead) to this
-environment, then `uv run python -m evals.run_scenarios` and do the actual
-3-criteria human review `PLAN.md` describes above.
+Full suite (at the time): 125 tests (26 new since Milestone 10), `ruff
+check`, `ruff format --check`, `mypy src/` all clean. **Done as of
+2026-09-25** — see the "Update" note above for the completed live run, the
+3-criteria human review, and the one real gap it found and fixed.
 
 ## Milestone 12 — Packaging pass — ✅ DONE 2026-09-23
 
@@ -606,12 +656,287 @@ policy) — stated as such, not quietly dropped. `CLAUDE.md`'s "How to run
 things" already picked up the two new `evals.*` entry points when
 Milestone 11 built them.
 
-**Left genuinely open, stated here rather than left implicit:** Milestone
-11's live-model eval run (`PLAN.md`'s own Milestone 11 section already
-flags this) — this packaging pass doesn't depend on it and isn't blocked by
-it, but it's the one item in this whole plan not yet exercised for real.
+**Left genuinely open at the time, stated here rather than left implicit:**
+Milestone 11's live-model eval run (`PLAN.md`'s own Milestone 11 section
+already flagged this) — this packaging pass didn't depend on it and wasn't
+blocked by it, but it was the one item in this whole plan not yet exercised
+for real. **Closed 2026-09-25:** a later session had `OPENROUTER_API_KEY`
+available, ran all 3 scenarios live plus a real same-session follow-up, and
+Milestone 11's section above now records the completed 3-criteria review.
 
 Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
 clean, confirmed both in-place and from the isolated checkout above. With
 this milestone, every `PLAN.md` milestone is either done or explicitly and
 narrowly blocked (Milestone 11's live run alone) — none silently skipped.
+
+## Milestone 13 — Live placebo-basket sourcing — ✅ DONE 2026-09-26
+
+**Definition of done:** `SPEC.md` §9 item 1's residual caveat ("no live
+basket-*sourcing* mechanism exists yet... this threshold is currently
+always hit") is actually closed, not just re-annotated: `analyze` produces
+a real, non-"insufficient" placebo verdict for a project whose wiki has
+been `fetch`ed with a real candidate pool, with both the popularity-tier
+and category-exclusion filters genuinely exercised — while a project that
+predates this milestone (no `cache/basket/` file yet) still degrades to
+Milestone 6's original empty-pool behavior rather than crashing. `analyze`
+still never touches the network (SPEC.md §2 unchanged).
+
+**Met.** Two new live sources, both `[UNVERIFIED-LIVE]` (this account's
+cloud environment still can't reach Wikimedia/Wikidata — Milestone 0's
+item 8 gap, unchanged), so both are cassette-tested rather than verified
+against the real APIs:
+- AQS's "top articles" endpoint (`api-notes.md` §1.3) seeds a wiki's
+  popularity-tier candidate pool for one safely-closed reference day
+  (`wikimedia/basket_source.reference_day`), filtering out the Main Page
+  and namespaced non-article pages (`is_candidate_title`).
+- Each surviving candidate's Wikidata item, looked up by `(site, title)`
+  one at a time (`wikidata_client.get_entity_by_site_title` — batching via
+  `sites=...&titles=a|b|c` was rejected: its response can't be reliably
+  mapped back to each title without an extra, unverified assumption),
+  supplies the `P31`/`P279` claims used as this implementation's practical
+  stand-in for "the topic's Wikidata category tree" (no single Wikidata
+  property is literally named that; `stats-methods.md` explains the
+  choice). The topic's own category QIDs are fetched the same way, folded
+  into `resolve`'s existing `wbgetentities` call (`props=sitelinks|claims`
+  — not a second round-trip) and exposed as `Cluster.category_qids`,
+  persisted on the saved project.
+
+Sourcing happens during `fetch` (`wikimedia/basket_source.py`), never
+`analyze` — the candidate pool + category QIDs are cached per wiki under
+`cache/basket/<wiki>.json` (`cache/basket.py`) at most once per calendar
+month (`fetch.BASKET_POOL_SIZE`, default 20, tunable; `0` disables
+sourcing), and each candidate's own pageview series is fetched/cached the
+ordinary way (`cache/store.ensure_series` — a candidate is just another
+cached article). `analyze` reads both, computes each candidate's own
+normalized Theil-Sen slope, and calls the already-tested `stats/placebo.py`
+selection/verdict path with a real basket instead of an empty one.
+`analyze._compute_analysis_hash`/`_collect_raw_file_hashes` were extended
+so the derived-stats cache correctly invalidates when basket data or the
+topic's category QIDs change, not just when the topic's own raw data does.
+
+**Test strategy, matching the existing convention exactly:** new pure-
+function tests for the filtering/sourcing helpers
+(`tests/test_basket_source.py`, no network); a cassette-backed `fetch`
+integration test proving the once-per-month cache refresh and per-candidate
+series fetch (`test_fetch_and_cache.py`); `analyze` integration tests
+proving both a real verdict *and* that both filters actually exclude
+correctly (a same-category candidate, a wildly-more-popular one) and that
+the pre-Milestone-13 "insufficient" path still holds with no basket cache
+present (`test_analyze.py`); one `resolve` cassette test proving the new
+`claims`-derived `category_qids` extraction. **All existing tests were left
+otherwise untouched**, not rewritten to account for the new HTTP calls
+`fetch` can now make: `tests/conftest.py` gained one more autouse fixture
+defaulting `fetch.BASKET_POOL_SIZE` to `0` (mirroring the existing
+`build_client`-patching autouse fixture's own reasoning), so every test
+that doesn't care about basket sourcing keeps its exact original cassette/
+call-count expectations, and only the tests that *do* exercise it opt back
+in explicitly.
+
+`SPEC.md` updated: §1's tree (`wikimedia/basket_source.py`, `cache/
+basket.py`, `cache/basket/` in the runtime layout), §3.1/§3.2's JSON
+examples (`cluster.category_qids`, `fetched.basket_candidates_sourced`),
+§9 item 1's annotation. `references/api-notes.md` (§1.3 promoted from
+"not currently used" to "used since Milestone 13," a new §2.3 for the
+site+title lookup, both still `[UNVERIFIED-LIVE]`), `references/
+stats-methods.md` (the "Placebo test" section rewritten to describe the
+sourcing mechanism instead of stating it doesn't exist), and `references/
+caching.md` (a new "Placebo-basket candidate cache" section, plus the
+derived-cache hash description updated) all updated to match.
+
+Full suite: 140 tests (15 new since Milestone 12), `ruff check`, `ruff
+format --check`, `mypy src/` all clean.
+
+## Milestone 14 — `bootstrap-script` escalation path — ✅ DONE 2026-09-25
+
+**Numbering note (consolidation pass):** built independently, in parallel
+with Milestone 13 above, on a separate branch — both were originally
+numbered "Milestone 13"; this one is renumbered to 14 since it merged
+second. No code overlap between the two (this touches `bootstrap_script.py`
+and its own CLI command; Milestone 13 touches `basket_source.py`/`cache/
+basket.py`) — renumbering is the only change from the original branch.
+
+**Why:** a real end-user request against this session's live environment
+(three genuine, spaced-out resolve/fetch attempts, 90s/150s/240s apart) hit
+Milestone 0's already-documented risk (`SPEC.md` §9 item 8) again, but with
+a new, sharper finding: Wikidata's `429` `retry-after` header *grew* across
+successive real waits (14s, then 37s after a second probe) rather than
+shrinking. That rules out "just wait a fixed amount longer" as a reliable
+strategy — the shared egress IP stays under load regardless of how long
+any one session waits — and turns §9 item 8's option (b) ("accept manual
+paste-back as a standing, documented process") from a nice-to-have into
+something the skill needed to actually implement, not just note.
+
+**Definition of done — met:**
+- ✅ New `bootstrap-script --project <slug>` command
+  (`src/curiosity_radar/commands/bootstrap_script.py`): reads a saved
+  project's already-resolved articles (works even if `fetch` itself never
+  completed — only `resolve` needs to have succeeded), and generates a
+  stdlib-only, zero-dependency Python script that fetches the exact same
+  AQS endpoints from wherever it's run and writes results directly into
+  `cache/store.py`'s own cache layout — one entry per (wiki, title) per
+  language, plus the redirect alias when `resolve` found one, plus each
+  wiki's `_aggregate` slot.
+- ✅ The generated script's fetch/cache logic **duplicates** (never
+  imports) `cache/store.py`'s month-key/closed-month/zero-fill functions
+  and `wikimedia/aqs_client.py`'s URL-building, the same "mirror, not
+  reuse" approach `evals/generate_cassettes.py` already established for
+  the identical reason: it has to run on a machine with no `uv`, no
+  `httpx`, possibly not even this repo cloned.
+- ✅ `BootstrapScriptResult` added to `schemas.py` (§3.8), a new
+  `project_not_resolved` error code added for the case a project exists
+  but never got a real article resolved, both cross-checked by
+  `tests/test_cli_contracts.py`.
+- ✅ `tests/test_bootstrap_script.py` — not just "the script runs": one
+  test executes the generated script's functions against a faked network,
+  copies its `cache/` output into a real data-dir, and asserts a real
+  `fetch --project ...` afterward makes **zero** HTTP requests for the
+  now-cached closed month (`AssertionError` if it tries) while still
+  reading back the correct day count — proving compatibility with
+  `cache/store.py`'s actual schema, not an assumed one. Two more cover the
+  clean-error paths (no project; project with no resolved articles) and
+  one confirms the generated source is syntactically valid Python
+  including the two-entry case (canonical title + redirect alias).
+- ✅ `SKILL.md` and `references/error-catalog.md` (new "Persistent
+  rate-limiting" section) tell the agent exactly when to stop retrying
+  `resolve`/`fetch` and reach for this instead, and what to do in the
+  edge case where `resolve` itself never once succeeded (no project to
+  bootstrap from yet).
+- ✅ `SPEC.md` §3.8 documents the command; §9 item 8 updated in place
+  (not re-litigated) with this milestone's finding and what it changed.
+
+Full suite: 131 tests (6 new), `ruff check`, `ruff format --check`,
+`mypy src/` all clean.
+
+## Milestone 15 — `resolve` suggests alternate QIDs on a sitelink gap — ✅ DONE 2026-09-25
+
+**Numbering note (consolidation pass):** built independently, also
+originally numbered "Milestone 13" (same collision as Milestone 14's
+note above) — renumbered to 15 since it merged third. No code overlap
+with Milestones 13/14: this touches `commands/resolve.py`'s sitelink-gap
+handling and `schemas.py`'s `SuggestedQid`, disjoint from both.
+
+**Prompted by a real live `resolve` run** (topic "Articulation"): the
+resolved QID had a `no_sitelink` gap in a requested language, while another
+entity from the same `wbsearchentities` results (a different, "neighboring"
+sense of the same topic word) actually had a sitelink for it — but nothing
+surfaced that to the agent, which per `SKILL.md`'s prior wording would just
+report the language dropped and stop there.
+
+**Definition of done:** when `resolved_qid` has a `no_sitelink` gap in at
+least one requested language, `resolve` checks the other `candidates`
+already fetched from the same topic search (no new/weaker cross-wiki
+search — see `SPEC.md` §9 item 2's original rejection of that) for their
+own sitelink coverage of the requested languages. Any candidate covering
+strictly more of them than `resolved_qid` is added to a new `suggested_qids`
+list (`schemas.py`), each entry naming the specific `additional_languages`
+it would add. Never an automatic substitution — same relationship
+`candidates` has to `resolved_qid` during an `ambiguous` match.
+`SKILL.md`'s "After `resolve`" section now tells the agent to check
+`suggested_qids` before reporting a language as unavailable, instead of
+stopping at `no_sitelink`.
+
+**Met.** `commands/resolve.py` computes `suggested_qids` only when there's
+an actual gap (an unaffected `resolve` call makes zero extra HTTP requests
+— covered by the existing cassette tests' `assert_exhausted()`, which would
+fail if extra calls were made unnecessarily). `--qid` (search skipped)
+still yields no `candidates` and therefore no `suggested_qids` either,
+unchanged from before. `SPEC.md` §3.1's worked example, §9 item 2's
+resolution note, and `references/error-catalog.md`'s soft-failures table
+updated; `test_resolve.py` covers both the positive case (a candidate
+covering the missing language) and the negative case (candidates exist but
+none cover more languages, so `suggested_qids` stays empty).
+
+## Milestone 16 — Related search terms (post-freeze feature request) — ✅ DONE 2026-09-25
+
+**Numbering note (consolidation pass):** built independently, also
+originally numbered "Milestone 13" — same collision as Milestones 14/15's
+notes above; renumbered to 16 since it merged fourth.
+
+**Why this is a milestone, not a side-fix:** requested after Milestone 12's
+"frozen architecture" pass — treated the same as any other change to
+`SPEC.md`'s design (dated update note, not a silent edit), per this
+project's own established convention (see the 2026-09-22 update note near
+`SPEC.md`'s top).
+
+**The request had two parts, evaluated separately before building
+anything:**
+1. "Add top-10 synonym/alternate-phrasing terms to the report, for the
+   user's next queries." **Feasible** — Wikidata already returns aliases
+   ("also known as" labels) for an entity, and `resolve` already makes a
+   `wbgetentities` call for sitelinks; adding `props=aliases` to that same
+   call needs no new endpoint.
+2. "Can we know the max number of users who searched in a given period?"
+   **Not feasible, and not built** — AQS exposes page-*view* counts
+   (`agent=user` filtered, still not a unique-visitor count), never
+   search-query volume or a unique-searcher count; Wikimedia doesn't
+   publish that data at all. Fabricating it would violate this project's
+   core anti-hallucination premise (every number in the report traces to
+   real derived data, checked by `verify`). `SPEC.md` §8 now states this
+   explicitly rather than leaving it as an inference from the existing
+   "not search demand" line.
+
+**Definition of done:** `resolve` returns `related_search_terms` (§3.1) —
+top 10, deduped, excludes the topic query and any already-resolved
+article/redirect title; persisted on project state; rendered as a new
+"Related search terms" section in the one-page PDF report (§6) by both
+renderers, with a graceful "none found" fallback; page count stays 1.
+Explicitly **not** added to `verify`'s claim list — it's descriptive text
+sourced deterministically from stored state (same category as
+`assumptions_text`), not a numeric/date fact to cross-check.
+
+**Met.** `wikimedia/wikidata_client.py` originally added a dedicated
+`get_sitelinks_and_aliases`, adding `props=aliases&languages=...` to a
+call separate from `get_entity`. The consolidation pass folded it into
+`get_entity` instead (already extended by the independently-built
+Milestone 13 to fetch `claims` in the same call): `get_entity` now takes
+props=`"sitelinks|claims|aliases"` plus this milestone's `languages=...`
+param in one shared call, and a new `aliases_from_entity` pure function
+(mirroring `sitelinks_from_entity`/`category_qids_from_entity`) extracts
+the alias lists — one HTTP round trip total across all three features'
+data, not two or three. `[UNVERIFIED-LIVE]` for the `aliases` half
+specifically, per `references/api-notes.md` §2.2, since this account's
+cloud sessions still can't reach live Wikidata (`SPEC.md` §9 item 8,
+unchanged); the shape follows Wikidata's documented Wikibase API contract,
+and a shape-faithful *synthetic* cassette fixture covers it in
+`tests/test_resolve.py`, the same honest treatment Milestone 2 gave shapes
+that session's live pass didn't happen to produce. `resolve.py`'s
+`_extract_related_search_terms` pools aliases across `"en"` plus every
+requested language (in that order, for deterministic output), dedupes
+case-insensitively, and excludes the topic query/resolved titles.
+`project_state.py`'s `ProjectState`/`create`/`save_from_resolve` gained a
+`related_search_terms` field (default `[]`, fully backward compatible with
+existing saved project files). `report/render.py` gained
+`related_search_terms_text` (mirrors `assumptions_text`'s pattern exactly)
+and both renderers gained a matching section between "Cross-language
+ranking" and "Assumptions".
+
+`evals/generate_cassettes.py`'s fixed sitelinks fixture needed its
+`wbgetentities` request key updated to match the merged `props`/
+`languages` params (empty `"claims": {}`/`"aliases": {}` bodies — this
+eval fixture's job is exercising the command chain against known trend
+shapes, not the category-exclusion or related-search-terms features); all
+three scenario manifests regenerated (`uv run python -m
+evals.generate_cassettes`). The consolidation pass also found a real gap
+this milestone's fixtures didn't anticipate: Milestone 13's placebo-basket
+sourcing defaults to on for a real `fetch` subprocess, and these three
+scenarios' cassettes have no top-articles/candidate-entity fixtures for
+it — `evals/run_scenarios.py`/`run_followup.py` now set
+`CURIOSITY_RADAR_BASKET_POOL_SIZE=0` in the subprocess env (a new env-var
+seam on `fetch.BASKET_POOL_SIZE`, since a real subprocess can't
+`monkeypatch.setattr` it the way `tests/conftest.py`'s autouse fixture
+does).
+
+`tests/test_resolve.py` adds two cases: aliases→`related_search_terms`
+with the dedup/exclusion rules all exercised in one fixture, and the
+cap-at-10 truncation. `tests/test_report_and_verify.py` adds: the section
+renders and keeps the report at one page even with 10 long alias strings,
+its terms are actually found in the extracted PDF text, `verify` still
+passes (confirming this section is correctly *not* wired into `verify`'s
+claim list), and the "no aliases found" fallback text renders correctly.
+
+Full suite: 131 tests (6 new), `ruff check`, `ruff format --check`,
+`mypy src/` all clean. `SPEC.md` (§1's update-note convention, §3.1, §3.5,
+§6, §8), `references/api-notes.md` (§2.2), and `references/
+report-template.md` (section list) updated to match; `SKILL.md` gained a
+one-line pointer so the agent knows to mention `related_search_terms` when
+present.

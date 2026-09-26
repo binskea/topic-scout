@@ -49,7 +49,12 @@ REFERENCES_ROOT = ROOT / "references"
 SKILL_MD = ROOT / "SKILL.md"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+# OpenRouter's free-tier lineup churns; this one was confirmed live and
+# tool-calling-capable during the Milestone 11 run recorded under
+# evals/results/ (2026-09-25). If it 404s or is retired, pick a current
+# free, tool-calling model from https://openrouter.ai/models?max_price=0
+# and pass --model.
+DEFAULT_MODEL = "inclusionai/ling-3.0-flash-sante:free"
 MAX_TURNS = 16
 COMMAND_TIMEOUT_SECONDS = 60
 
@@ -153,7 +158,14 @@ def _call_openrouter(api_key: str, model: str, messages: list[dict[str, Any]]) -
         timeout=120,
     )
     response.raise_for_status()
-    return response.json()
+    body: dict[str, Any] = response.json()
+    if "choices" not in body:
+        # OpenRouter can return HTTP 200 with an {"error": {...}} body when
+        # the upstream free-tier provider is overloaded/rate-limited —
+        # observed live during the Milestone 11 run. Fail with the actual
+        # provider message instead of a confusing KeyError on 'choices'.
+        raise RuntimeError(f"OpenRouter returned no choices: {body.get('error', body)}")
+    return body
 
 
 def _run_scenario(scenario: Scenario, *, api_key: str, model: str) -> dict[str, Any]:
@@ -168,6 +180,12 @@ def _run_scenario(scenario: Scenario, *, api_key: str, model: str) -> dict[str, 
         "CURIOSITY_RADAR_CASSETTE_DIR": str(ROOT / "evals" / "cassettes" / scenario.slug),
         "CURIOSITY_RADAR_FAKE_TODAY": scenario.fake_today,
         "CURIOSITY_RADAR_DATA_DIR": str(data_dir),
+        # Milestone 13's placebo-basket sourcing predates none of these
+        # scenarios' fixtures, which have no top-articles/candidate-entity
+        # cassette entries recorded — same reason tests/conftest.py defaults
+        # BASKET_POOL_SIZE to 0 for pytest, just via the env-var seam since
+        # this runs as a real subprocess instead.
+        "CURIOSITY_RADAR_BASKET_POOL_SIZE": "0",
     }
 
     system_prompt = (

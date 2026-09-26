@@ -51,3 +51,27 @@ async def _get_items(client: httpx.AsyncClient, url: str) -> list[dict]:
             return []
         raise
     return list(data.get("items", []))
+
+
+async def fetch_top_articles(client: httpx.AsyncClient, wiki: str, day: date) -> list[dict]:
+    """The wiki's most-viewed articles for one calendar day — used only as a
+    popularity-tier candidate pool for the placebo basket (`wikimedia/
+    basket_source.py`, SPEC.md §9 item 1). Shape per Wikimedia's published
+    docs (each response item carries an `articles` list of `{article, views,
+    rank}`); never exercised in Milestone 0's live-verification pass
+    (`references/api-notes.md` §1.3 — `[UNVERIFIED-LIVE]`), so this is
+    written defensively (empty `items`/`articles` both degrade to `[]`,
+    same as an out-of-range 404) rather than assuming the exact shape holds.
+    Unlike per-article/aggregate, this endpoint has no `agent` path segment.
+    """
+    url = f"{AQS_BASE}/top/{wiki}/{ACCESS}/{day.year:04d}/{day.month:02d}/{day.day:02d}"
+    try:
+        data = await get_json(client, url)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return []
+        raise
+    items = data.get("items", [])
+    if not items:
+        return []
+    return list(items[0].get("articles", []))

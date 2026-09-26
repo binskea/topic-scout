@@ -11,7 +11,10 @@ import json
 import os
 from pathlib import Path
 
-from evals.run_scenarios import _read_reference, _run_command
+import httpx
+import pytest
+
+from evals.run_scenarios import _call_openrouter, _read_reference, _run_command
 
 _REAL_ENV = dict(os.environ)
 
@@ -77,3 +80,21 @@ def test_read_reference_rejects_a_non_markdown_file_even_under_references() -> N
 def test_read_reference_rejects_a_nonexistent_file() -> None:
     result = _read_reference("references/does-not-exist.md")
     assert result.startswith("Error:")
+
+
+def test_call_openrouter_raises_on_an_http_200_provider_error_body(monkeypatch) -> None:
+    # OpenRouter's free-tier providers can return HTTP 200 with an
+    # {"error": {...}} body instead of "choices" when overloaded/rate-
+    # limited (observed live running Milestone 11 against a free model) —
+    # this must fail loudly with the provider's own message, not a bare
+    # KeyError on 'choices'.
+    def fake_post(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"error": {"message": "Upstream error from Nvidia: Service overloaded"}},
+            request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(RuntimeError, match="Service overloaded"):
+        _call_openrouter("fake-key", "fake-model", [])

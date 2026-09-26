@@ -146,14 +146,22 @@ Same segment semantics as §1.1 minus `article`. Confirmed shape:
 Used as the denominator for "share of project daily traffic" normalization
 (`SPEC.md` §5).
 
-### 1.3 Top articles (not currently used by v1 design, noted for completeness)
+### 1.3 Top articles (used since Milestone 13 for placebo-basket sourcing)
 
 ```
 GET /metrics/pageviews/top/{project}/{access}/{year}/{month}/{day}
 ```
-Not exercised in this verification pass — still `[UNVERIFIED-LIVE]`, low
-priority since v1 doesn't depend on it (placebo-basket sampling uses
-Wikidata, not this endpoint).
+Not exercised in Milestone 0's live-verification pass — still
+`[UNVERIFIED-LIVE]`. Milestone 13 (`wikimedia/aqs_client.fetch_top_articles`)
+now depends on it for placebo-basket candidate sourcing (`stats-methods.md`'s
+"Placebo test" section), written defensively against the shape gap: each
+response item's `articles` list (`{article, views, rank}`) per Wikimedia's
+published docs, degrading to `[]` on a 404 or an empty `items`, the same
+as the already-confirmed out-of-range behavior for §1.1/1.2. Worth a real
+verification pass (add a probe to `verify_live_api.sh`) before leaning on
+its exact shape for anything more consequential than basket candidate
+seeding, where a wrong assumption just means an unusually thin basket, not
+a wrong number in the report.
 
 ## 2. Wikidata — topic → QID → sitelinks
 
@@ -191,7 +199,7 @@ array present on alias matches). `resolve`'s `candidates` output must not
 invent a numeric score — `SPEC.md` has been corrected to drop it.
 `search-continue` supports pagination beyond `limit`.
 
-### 2.2 Entity data (QID → sitelinks, labels, descriptions)
+### 2.2 Entity data (QID → sitelinks, labels, descriptions, aliases)
 
 ```
 GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids={QID}&props=sitelinks&format=json
@@ -222,9 +230,71 @@ the dbname pattern on the languages observed; still worth a lookup table
 rather than blind concatenation for languages with known irregular codes,
 none of which appeared in this sample]`
 
+**Milestone 16 addition — aliases, folded into the same call** (renumbered
+in the consolidation pass; also folds in Milestone 13's `claims`, added
+independently on a separate branch — see `resolve.py`'s own docstring):
+```
+GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids={QID}&props=sitelinks|claims|aliases&languages=en|pl|cs&format=json
+```
+```json
+{
+  "entities": {
+    "Q_EXAMPLE": {
+      "type": "item",
+      "id": "Q_EXAMPLE",
+      "sitelinks": {"...": "as above"},
+      "aliases": {
+        "en": [{"language": "en", "value": "Alternate Name"}],
+        "pl": [{"language": "pl", "value": "Nazwa alternatywna"}]
+      }
+    }
+  },
+  "success": 1
+}
+```
+`[UNVERIFIED-LIVE]`: this follows Wikidata's documented Wikibase API
+contract exactly (the same `aliases.<lang> = [{language, value}]` shape
+every Wikibase deployment uses), but — unlike the `props=sitelinks` call
+above — hasn't itself been exercised against a live request in this
+account's cloud environment; the blanket Wikimedia/Wikidata egress block
+(§9 item 8 of `SPEC.md`, still unresolved) applies here too.
+`languages` restricts which language(s)' aliases come back — omitted
+entirely, all languages the entity has aliases in are returned; `resolve`
+always passes it explicitly (`"en"` plus every requested wiki language) to
+avoid pulling aliases in languages nobody asked about. An entity with zero
+aliases in a given language simply omits that language's key from
+`aliases` (not an empty array) — `resolve`'s `get_sitelinks_and_aliases`
+treats a missing key the same as an empty list.
+
 **Reminder (see top of file): don't reuse `Q1631107` as "intermittent
 fasting" anywhere — it's Bibliography.** Use `Q_EXAMPLE` in docs/tests, and
 resolve real topics live via `wbsearchentities` at runtime.
+
+**`props=claims` (Milestone 13):** `resolve` now requests
+`props=sitelinks|claims` in this same call (not a second round-trip) to
+also extract the topic's `P31`/`P279` claims for placebo-basket category
+exclusion (`stats-methods.md`). Not separately verified live — the claims
+shape (`claims.P31[].mainsnak.datavalue.value.id`) is Wikidata's standard,
+widely-documented entity format, not something Milestone 0 needed to probe
+specifically, but still `[UNVERIFIED-LIVE]` in the narrow sense that no
+real response has been captured for this exact `props` value.
+
+### 2.3 Entity by site + title (used since Milestone 13, basket sourcing)
+
+```
+GET https://www.wikidata.org/w/api.php?action=wbgetentities&sites={dbname}&titles={title}&props=claims&format=json
+```
+`[UNVERIFIED-LIVE]` — never exercised in Milestone 0. Used by
+`wikimedia/basket_source.fetch_candidate_category_qids` to find a placebo-
+basket candidate's Wikidata item from its title alone (one title per call
+— see that function's docstring for why a batched `titles=a|b|c` call
+isn't used instead: its response can't be reliably mapped back to each
+title without an extra, unverified assumption). A title with no
+corresponding item is expected to come back as `{"entities": {"<site>:
+<title>": {"missing": ""}}}` per Wikidata's documented convention for this
+parameter combination — written defensively (any "missing" key on the one
+returned entity is treated as absent) rather than assuming the exact
+pseudo-key shape holds.
 
 ## 3. MediaWiki API — title normalization & redirect resolution
 

@@ -32,13 +32,107 @@ async def search_entities(
     return list(data.get("search", []))
 
 
-async def get_sitelinks(client: httpx.AsyncClient, qid: str) -> dict[str, str]:
-    """Return `{dbname: title}` (e.g. `{"plwiki": "..."}`) for a QID.
-
-    A dbname absent from the result means no sitelink exists for that wiki.
-    """
-    params = {"action": "wbgetentities", "ids": qid, "props": "sitelinks", "format": "json"}
+async def get_entity(
+    client: httpx.AsyncClient, qid: str, *, props: str = "sitelinks", languages: str | None = None
+) -> dict[str, Any]:
+    """Return the raw entity dict for `qid` (whichever top-level keys `props`
+    asked for — e.g. `"sitelinks"`, `"claims"`, or `"sitelinks|claims|aliases"`
+    to get all three in one call rather than several round-trips). `languages`
+    restricts language-specific fields (aliases/labels/descriptions — never
+    sitelinks or claims) to the given `|`-joined language codes; omitted, the
+    API returns every language it has for those fields."""
+    params = {"action": "wbgetentities", "ids": qid, "props": props, "format": "json"}
+    if languages is not None:
+        params["languages"] = languages
     data = await get_json(client, WIKIDATA_API, params=params)
-    entity = data.get("entities", {}).get(qid, {})
+    return dict(data.get("entities", {}).get(qid, {}))
+
+
+async def get_entity_by_site_title(
+    client: httpx.AsyncClient, site: str, title: str
+) -> dict[str, Any] | None:
+    """`wbgetentities` looked up by `(site, title)` (a MediaWiki dbname like
+    `"enwiki"` plus a page title) instead of a known QID — used by
+    `wikimedia/basket_source.py` to find a placebo-basket candidate's
+    Wikidata item from its title alone. One title per call (batching
+    several via `sites=...&titles=a|b|c` was never exercised live and its
+    response can't be reliably mapped back to each title without an extra,
+    unverified assumption — see that module's docstring). Returns `None`
+    when the title has no corresponding Wikidata item at all.
+    """
+    params = {
+        "action": "wbgetentities",
+        "sites": site,
+        "titles": title,
+        "props": "claims",
+        "format": "json",
+    }
+    data = await get_json(client, WIKIDATA_API, params=params)
+    for entity in data.get("entities", {}).values():
+        if "missing" in entity:
+            return None
+        return dict(entity)
+    return None
+
+
+def sitelinks_from_entity(entity: dict[str, Any]) -> dict[str, str]:
+    """`{dbname: title}` (e.g. `{"plwiki": "..."}`) from an entity dict
+    fetched with `props` including `"sitelinks"`. A dbname absent from the
+    result means no sitelink exists for that wiki."""
     sitelinks = entity.get("sitelinks", {})
     return {site: info["title"] for site, info in sitelinks.items()}
+
+
+async def get_sitelinks(client: httpx.AsyncClient, qid: str) -> dict[str, str]:
+    """Return `{dbname: title}` (e.g. `{"plwiki": "..."}`) for a QID."""
+    return sitelinks_from_entity(await get_entity(client, qid, props="sitelinks"))
+
+
+def aliases_from_entity(entity: dict[str, Any], alias_languages: list[str]) -> dict[str, list[str]]:
+    """`{language: [alias, ...]}` restricted to `alias_languages`, from an
+    entity dict fetched with `props` including `"aliases"` (ideally with a
+    matching `languages` request param too, though this filters again
+    defensively either way — an entity may have zero aliases in a given
+    language). These are Wikidata's "also known as" labels for the entity —
+    real alternate phrasings a user could search next, not a general
+    synonym dictionary.
+
+    `[UNVERIFIED-LIVE]`: the `props=aliases` shape here follows Wikidata's
+    documented Wikibase API contract exactly (same `entities.<QID>.aliases.
+    <lang> = [{"language": ..., "value": ...}]` shape as every other
+    Wikibase deployment), but — like the rest of `api-notes.md`'s few
+    residual items — has not itself been exercised against a live call in
+    this account's cloud environment (`SPEC.md` §9 item 8: Wikimedia/
+    Wikidata domains are blocked outright here). The existing `props=
+    sitelinks` half of the same call *is* `[CONFIRMED 2026-09-22]`.
+    """
+    aliases = entity.get("aliases", {})
+    return {
+        lang: [item["value"] for item in aliases[lang]]
+        for lang in alias_languages
+        if lang in aliases
+    }
+
+
+# "Instance of" / "subclass of" — used as this implementation's practical
+# proxy for SPEC.md §5's "the topic's Wikidata category tree": no single
+# Wikidata property is literally named that, and P910 ("topic's main
+# category", the closest literal match) is sparsely populated in practice;
+# P31/P279 (what kind of thing an item *is*) classify a topic well enough
+# to exclude thematically related placebo candidates, and are populated on
+# almost every item. This implementation's own choice, not a frozen SPEC.md
+# threshold — see `references/stats-methods.md`.
+CATEGORY_CLAIM_PROPERTIES = ("P31", "P279")
+
+
+def category_qids_from_entity(entity: dict[str, Any]) -> frozenset[str]:
+    """QIDs from `entity`'s `CATEGORY_CLAIM_PROPERTIES` claims (an entity
+    dict fetched with `props` including `"claims"`) — empty when the entity
+    has none of those claims, or wasn't fetched with claims at all."""
+    qids: set[str] = set()
+    for prop in CATEGORY_CLAIM_PROPERTIES:
+        for claim in entity.get("claims", {}).get(prop, []):
+            value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+            if isinstance(value, dict) and "id" in value:
+                qids.add(value["id"])
+    return frozenset(qids)
