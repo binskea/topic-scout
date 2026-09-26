@@ -67,6 +67,22 @@ hand-edit the PDF) and `verify` again. The report's own footer line is a
 fixed string, not a live check — it does not mean `verify` already passed
 (see `references/report-template.md`).
 
+## Persistent rate-limiting: don't retry forever
+
+A single `rate_limited` error from `resolve`/`fetch` is often transient —
+wait a bit and retry once. But if it recurs across a **few genuinely
+spaced-out retries spanning several minutes** (not a tight loop — real
+waiting), stop retrying and tell the user Wikimedia is currently
+unreachable from this environment. Then, if `resolve` has succeeded at
+least once for this project (so its articles are on file even if `fetch`
+never completed), run `uv run curiosity-radar bootstrap-script --project
+<slug>` and hand the user the generated script plus its `instructions`
+field verbatim — it lets them fetch the same data from their own machine
+(stdlib-only, no install needed) and hand back a `cache/` folder that
+lets `fetch` finish with zero further network calls. Full detail,
+including what to do if `resolve` itself never once succeeded:
+`references/error-catalog.md`'s "Persistent rate-limiting" section.
+
 ## Follow-ups without starting cold
 
 For a same-conversation follow-up ("also check Slovak," "drop 2024," "what

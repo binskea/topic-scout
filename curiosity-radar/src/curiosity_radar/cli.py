@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.commands import analyze as analyze_cmd
+from curiosity_radar.commands import bootstrap_script as bootstrap_script_cmd
 from curiosity_radar.commands import chart as chart_cmd
 from curiosity_radar.commands import fetch as fetch_cmd
 from curiosity_radar.commands import project as project_cmd
@@ -204,6 +205,17 @@ def verify(
 ) -> None:
     """Cross-check a rendered report's numbers against the derived-stats JSON."""
     _guard(data_dir, verify_cmd.run, project=project, pdf=pdf, data_dir=data_dir)
+
+
+@app.command("bootstrap-script")
+def bootstrap_script(
+    project: str = typer.Option(
+        ..., "--project", help="Project slug (must have resolved articles)."
+    ),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+) -> None:
+    """Generate a stdlib-only local pageview fetcher for a rate-limited fetch (SPEC.md §3.8)."""
+    _guard(data_dir, bootstrap_script_cmd.run, project=project, data_dir=data_dir)
 
 
 @project_app.command("list")

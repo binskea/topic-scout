@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 from curiosity_radar.cli import app
 from curiosity_radar.schemas import (
     AnalyzeResult,
+    BootstrapScriptResult,
     ChartResult,
     ErrorResponse,
     FetchResult,
@@ -127,6 +128,19 @@ def test_report_returns_schema_valid_json(tmp_path: Path) -> None:
 
 def test_report_help() -> None:
     result = runner.invoke(app, ["report", "--help"])
+    assert result.exit_code == 0
+
+
+def test_bootstrap_script_returns_schema_valid_json(tmp_path: Path) -> None:
+    invoke(tmp_path, "resolve", "--topic", "astronomy", "--languages", "uk", "--save-as", "demo")
+    code, payload = invoke(tmp_path, "bootstrap-script", "--project", "demo")
+    assert code == 0
+    result = BootstrapScriptResult.model_validate(payload)
+    assert Path(result.script_path).exists()
+
+
+def test_bootstrap_script_help() -> None:
+    result = runner.invoke(app, ["bootstrap-script", "--help"])
     assert result.exit_code == 0
 
 
