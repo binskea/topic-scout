@@ -8,6 +8,13 @@ discovered by `resolve` is fetched and summed into its language's series
 (Milestone 0 finding: AQS tracks a redirect title's traffic separately from
 its canonical target); the project-aggregate series is fetched/cached
 alongside per-article data for later normalization (Milestone 4+).
+
+Milestone 13: also sources/caches each fetched wiki's placebo-basket
+candidate pool (SPEC.md §9 item 1) — see `wikimedia/basket_source.py` and
+`cache/basket.py`. `analyze` (which never touches the network) reads this
+cache and each candidate's own pageview series (fetched here, the same way
+as any project article) to finally produce a real placebo verdict instead
+of always hitting the empty-basket "insufficient comparison data" path.
 """
 
 from __future__ import annotations
@@ -19,19 +26,29 @@ from pathlib import Path
 import httpx
 
 from curiosity_radar import clock, project_state
+from curiosity_radar.cache import basket as basket_cache
 from curiosity_radar.cache import store
 from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.commands import resolve as resolve_cmd
 from curiosity_radar.errors import CommandError
 from curiosity_radar.project_state import ProjectState
 from curiosity_radar.schemas import CoverageEntry, FetchedSummary, FetchResult
-from curiosity_radar.wikimedia import aqs_client
+from curiosity_radar.wikimedia import aqs_client, basket_source
 from curiosity_radar.wikimedia.http import RETRY_STATUS_CODES, build_client
 
 # [UNVERIFIED-LIVE] believed ~2015-07-01 (Milestone 0 only confirmed 2010 predates it,
 # not the exact boundary) — used as a safe clamp point, not an exact cutoff.
 AQS_EARLIEST_DATE = date(2015, 7, 1)
 AGGREGATE_SLOT = store.AGGREGATE_SLOT
+
+# Placebo-basket candidates sourced per wiki per month (`cache/basket.py`).
+# Oversampled vs. the default `--placebo-basket-size` (20) and
+# `stats/placebo.MIN_ELIGIBLE_FOR_VERDICT` (10) so popularity-tier +
+# category-exclusion filtering at analyze time still usually leaves enough.
+# This implementation's own tunable choice, not a frozen SPEC.md constant —
+# see `references/stats-methods.md`. 0 disables basket sourcing entirely
+# (used by tests that don't exercise it, to keep their cassettes unchanged).
+BASKET_POOL_SIZE = 20
 
 
 def run(
@@ -67,6 +84,7 @@ def run(
             qid=resolved.resolved_qid or "",
             languages=languages,
             articles=resolved.cluster.articles if resolved.cluster else {},
+            category_qids=resolved.cluster.category_qids if resolved.cluster else [],
         )
     else:
         # A language added via `project set --add-language` (SPEC.md §2's "add
@@ -239,6 +257,50 @@ async def _fetch(
                 )
                 http_requests_made += requests
                 fresh_months |= months
+
+            basket_candidates_sourced = 0
+            if BASKET_POOL_SIZE > 0:
+                current_month = store.month_key(today)
+                for wiki in wikis:
+                    meta = basket_cache.load(data_root, wiki)
+                    if basket_cache.needs_refresh(meta, current_month):
+                        day = basket_source.reference_day(today)
+                        titles = await basket_source.fetch_candidate_titles(
+                            client, wiki, day=day, limit=BASKET_POOL_SIZE
+                        )
+                        http_requests_made += 1
+                        category_qids_by_title = await basket_source.fetch_candidate_category_qids(
+                            client, wiki, titles
+                        )
+                        http_requests_made += len(titles)
+                        meta = basket_cache.BasketCacheFile(
+                            sourced_month=current_month,
+                            candidates=[
+                                basket_cache.BasketCandidateMeta(
+                                    title=t, category_qids=sorted(category_qids_by_title[t])
+                                )
+                                for t in titles
+                                if t in category_qids_by_title
+                            ],
+                        )
+                        basket_cache.save(data_root, wiki, meta)
+                        basket_candidates_sourced += len(meta.candidates)
+
+                    # guaranteed: not needing a refresh means load() found one
+                    assert meta is not None
+                    for candidate in meta.candidates:
+                        _, requests, months = await store.ensure_series(
+                            data_root,
+                            wiki=wiki,
+                            article_slot=candidate.title,
+                            granularity=granularity,
+                            start=effective_start,
+                            end=requested_end,
+                            today=today,
+                            fetch_range=_make_range(wiki, candidate.title),
+                        )
+                        http_requests_made += requests
+                        fresh_months |= months
     except httpx.TransportError as exc:
         raise CommandError(
             "network_error",
@@ -274,6 +336,7 @@ async def _fetch(
         days_from_cache=days_from_cache,
         days_freshly_fetched=days_freshly_fetched,
         http_requests_made=http_requests_made,
+        basket_candidates_sourced=basket_candidates_sourced,
     )
 
     fetch_result = FetchResult(

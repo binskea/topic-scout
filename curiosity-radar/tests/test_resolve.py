@@ -154,6 +154,91 @@ def test_resolve_happy_path_all_languages_resolve(
     assert result.cluster.articles["cs"].title == "Python (programovací jazyk)"
 
 
+def test_resolve_extracts_the_topics_category_qids_from_claims(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Milestone 13: `resolve` now asks for `sitelinks|claims` in the same
+    `wbgetentities` call (not an extra HTTP round-trip) and exposes the
+    P31/P279 QIDs on `Cluster.category_qids`, for `stats/placebo.py`'s
+    basket-exclusion filter later. An entity with no claims at all (every
+    other test's cassette) must still resolve fine with `category_qids: []`
+    — this is the one test that actually populates `claims`."""
+    qid = "Q28865"
+    cassette = SequentialCassette(
+        [
+            (
+                {"action": "wbsearchentities", "search": "Python (programming language)"},
+                {
+                    "searchinfo": {"search": "Python (programming language)"},
+                    "search": [
+                        {
+                            "id": qid,
+                            "title": qid,
+                            "pageid": 1,
+                            "concepturi": f"http://www.wikidata.org/entity/{qid}",
+                            "repository": "wikidata",
+                            "url": f"//www.wikidata.org/wiki/{qid}",
+                            "display": {
+                                "label": {"value": "Python", "language": "en"},
+                                "description": {"value": "programming language", "language": "en"},
+                            },
+                            "label": "Python",
+                            "description": "programming language",
+                            "match": {
+                                "type": "label",
+                                "language": "en",
+                                "text": "Python (programming language)",
+                            },
+                        }
+                    ],
+                    "search-continue": 10,
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "wbgetentities", "ids": qid},
+                {
+                    "entities": {
+                        qid: {
+                            "type": "item",
+                            "id": qid,
+                            "sitelinks": {
+                                "enwiki": {
+                                    "site": "enwiki",
+                                    "title": "Python (programming language)",
+                                    "badges": [],
+                                }
+                            },
+                            "claims": {
+                                "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q9143"}}}}],
+                            },
+                        }
+                    },
+                    "success": 1,
+                },
+            ),
+            (
+                {"action": "query", "titles": "Python (programming language)"},
+                _load("07a_mediawiki_normal.json"),
+            ),
+        ]
+    )
+    _use_cassette(monkeypatch, cassette)
+
+    result = resolve_cmd.run(
+        topic="Python (programming language)",
+        qid=None,
+        languages=["en"],
+        related_qids=[],
+        save_as=None,
+        data_dir=tmp_path,
+    )
+
+    cassette.assert_exhausted()
+    assert result.cluster is not None
+    assert result.cluster.category_qids == ["Q9143"]
+
+
 def test_resolve_ambiguous_entity_flagged_not_guessed_silently(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

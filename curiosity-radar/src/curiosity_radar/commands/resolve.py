@@ -50,6 +50,7 @@ def run(
             qid=result.resolved_qid or "",
             languages=languages,
             articles=result.cluster.articles if result.cluster else {},
+            category_qids=result.cluster.category_qids if result.cluster else [],
         )
 
     return result
@@ -135,7 +136,9 @@ async def _resolve_impl(
                     "confirm resolved_qid or rerun with --qid."
                 )
 
-        sitelinks = await wikidata_client.get_sitelinks(client, resolved_qid)
+        entity = await wikidata_client.get_entity(client, resolved_qid, props="sitelinks|claims")
+        sitelinks = wikidata_client.sitelinks_from_entity(entity)
+        category_qids = wikidata_client.category_qids_from_entity(entity)
 
         articles: dict[str, ArticleInfo] = {}
         for lang in languages:
@@ -160,7 +163,12 @@ async def _resolve_impl(
                 exists=True,
             )
 
-        cluster = Cluster(primary_qid=resolved_qid, related_qids=related_qids, articles=articles)
+        cluster = Cluster(
+            primary_qid=resolved_qid,
+            related_qids=related_qids,
+            articles=articles,
+            category_qids=sorted(category_qids),
+        )
 
         return ResolveResult(
             topic_query=topic,

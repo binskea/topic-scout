@@ -615,3 +615,80 @@ Full suite: 125 tests, `ruff check`, `ruff format --check`, `mypy src/` all
 clean, confirmed both in-place and from the isolated checkout above. With
 this milestone, every `PLAN.md` milestone is either done or explicitly and
 narrowly blocked (Milestone 11's live run alone) — none silently skipped.
+
+## Milestone 13 — Live placebo-basket sourcing — ✅ DONE 2026-09-26
+
+**Definition of done:** `SPEC.md` §9 item 1's residual caveat ("no live
+basket-*sourcing* mechanism exists yet... this threshold is currently
+always hit") is actually closed, not just re-annotated: `analyze` produces
+a real, non-"insufficient" placebo verdict for a project whose wiki has
+been `fetch`ed with a real candidate pool, with both the popularity-tier
+and category-exclusion filters genuinely exercised — while a project that
+predates this milestone (no `cache/basket/` file yet) still degrades to
+Milestone 6's original empty-pool behavior rather than crashing. `analyze`
+still never touches the network (SPEC.md §2 unchanged).
+
+**Met.** Two new live sources, both `[UNVERIFIED-LIVE]` (this account's
+cloud environment still can't reach Wikimedia/Wikidata — Milestone 0's
+item 8 gap, unchanged), so both are cassette-tested rather than verified
+against the real APIs:
+- AQS's "top articles" endpoint (`api-notes.md` §1.3) seeds a wiki's
+  popularity-tier candidate pool for one safely-closed reference day
+  (`wikimedia/basket_source.reference_day`), filtering out the Main Page
+  and namespaced non-article pages (`is_candidate_title`).
+- Each surviving candidate's Wikidata item, looked up by `(site, title)`
+  one at a time (`wikidata_client.get_entity_by_site_title` — batching via
+  `sites=...&titles=a|b|c` was rejected: its response can't be reliably
+  mapped back to each title without an extra, unverified assumption),
+  supplies the `P31`/`P279` claims used as this implementation's practical
+  stand-in for "the topic's Wikidata category tree" (no single Wikidata
+  property is literally named that; `stats-methods.md` explains the
+  choice). The topic's own category QIDs are fetched the same way, folded
+  into `resolve`'s existing `wbgetentities` call (`props=sitelinks|claims`
+  — not a second round-trip) and exposed as `Cluster.category_qids`,
+  persisted on the saved project.
+
+Sourcing happens during `fetch` (`wikimedia/basket_source.py`), never
+`analyze` — the candidate pool + category QIDs are cached per wiki under
+`cache/basket/<wiki>.json` (`cache/basket.py`) at most once per calendar
+month (`fetch.BASKET_POOL_SIZE`, default 20, tunable; `0` disables
+sourcing), and each candidate's own pageview series is fetched/cached the
+ordinary way (`cache/store.ensure_series` — a candidate is just another
+cached article). `analyze` reads both, computes each candidate's own
+normalized Theil-Sen slope, and calls the already-tested `stats/placebo.py`
+selection/verdict path with a real basket instead of an empty one.
+`analyze._compute_analysis_hash`/`_collect_raw_file_hashes` were extended
+so the derived-stats cache correctly invalidates when basket data or the
+topic's category QIDs change, not just when the topic's own raw data does.
+
+**Test strategy, matching the existing convention exactly:** new pure-
+function tests for the filtering/sourcing helpers
+(`tests/test_basket_source.py`, no network); a cassette-backed `fetch`
+integration test proving the once-per-month cache refresh and per-candidate
+series fetch (`test_fetch_and_cache.py`); `analyze` integration tests
+proving both a real verdict *and* that both filters actually exclude
+correctly (a same-category candidate, a wildly-more-popular one) and that
+the pre-Milestone-13 "insufficient" path still holds with no basket cache
+present (`test_analyze.py`); one `resolve` cassette test proving the new
+`claims`-derived `category_qids` extraction. **All existing tests were left
+otherwise untouched**, not rewritten to account for the new HTTP calls
+`fetch` can now make: `tests/conftest.py` gained one more autouse fixture
+defaulting `fetch.BASKET_POOL_SIZE` to `0` (mirroring the existing
+`build_client`-patching autouse fixture's own reasoning), so every test
+that doesn't care about basket sourcing keeps its exact original cassette/
+call-count expectations, and only the tests that *do* exercise it opt back
+in explicitly.
+
+`SPEC.md` updated: §1's tree (`wikimedia/basket_source.py`, `cache/
+basket.py`, `cache/basket/` in the runtime layout), §3.1/§3.2's JSON
+examples (`cluster.category_qids`, `fetched.basket_candidates_sourced`),
+§9 item 1's annotation. `references/api-notes.md` (§1.3 promoted from
+"not currently used" to "used since Milestone 13," a new §2.3 for the
+site+title lookup, both still `[UNVERIFIED-LIVE]`), `references/
+stats-methods.md` (the "Placebo test" section rewritten to describe the
+sourcing mechanism instead of stating it doesn't exist), and `references/
+caching.md` (a new "Placebo-basket candidate cache" section, plus the
+derived-cache hash description updated) all updated to match.
+
+Full suite: 140 tests (15 new since Milestone 12), `ruff check`, `ruff
+format --check`, `mypy src/` all clean.

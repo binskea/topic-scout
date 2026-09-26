@@ -57,6 +57,7 @@ class Cluster(StrictModel):
     primary_qid: str
     related_qids: list[str] = []
     articles: dict[str, ArticleInfo] = {}
+    category_qids: list[str] = []
 
 
 class ResolveResult(StrictModel):
@@ -80,6 +81,7 @@ class FetchedSummary(StrictModel):
     days_from_cache: int
     days_freshly_fetched: int
     http_requests_made: int
+    basket_candidates_sourced: int = 0
 
 
 class CoverageEntry(StrictModel):

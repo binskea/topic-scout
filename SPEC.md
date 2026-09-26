@@ -40,9 +40,10 @@ curiosity-radar/
 │   │   ├── verify.py                 # checks rendered report numbers vs. computed JSON
 │   │   └── project.py                # list/show/set/fork saved project state
 │   ├── wikimedia/
-│   │   ├── wikidata_client.py        # search, sitelinks
+│   │   ├── wikidata_client.py        # search, sitelinks, entity claims (category QIDs)
 │   │   ├── mediawiki_client.py       # title normalization, redirect resolution
-│   │   ├── aqs_client.py             # per-article + aggregate pageviews
+│   │   ├── aqs_client.py             # per-article + aggregate + top-articles pageviews
+│   │   ├── basket_source.py          # live placebo-basket candidate sourcing (Milestone 13)
 │   │   └── http.py                   # shared httpx client: retries, backoff, User-Agent
 │   ├── stats/
 │   │   ├── trend.py                  # Theil-Sen + Mann-Kendall
@@ -55,7 +56,8 @@ curiosity-radar/
 │   │   ├── fpdf2_renderer.py
 │   │   └── template.html             # HTML/CSS layout used by the WeasyPrint path
 │   ├── cache/
-│   │   ├── store.py                  # cache key scheme, read/write, closed-month logic
+│   │   ├── store.py                  # raw-pageview cache key scheme, read/write, closed-month logic
+│   │   ├── basket.py                 # per-wiki placebo-basket candidate metadata cache (Milestone 13)
 │   │   └── paths.py                  # resolves the runtime data dir (see below)
 │   ├── project_state.py              # load/save/mutate the project/session file
 │   ├── clock.py                      # "today" seam — real wall time, or CURIOSITY_RADAR_FAKE_TODAY for evals (Milestone 11)
@@ -124,6 +126,8 @@ than starting cold.
 │   ├── raw/
 │   │   └── <project>/<article-or-aggregate>/<granularity>/<YYYY-MM>.json   # one file per closed month, immutable
 │   │   └── <project>/<article-or-aggregate>/<granularity>/current.json    # always-refetched partial period
+│   ├── basket/
+│   │   └── <wiki>.json                                          # placebo-basket candidate pool, resourced monthly (Milestone 13)
 │   └── derived/
 │       └── <schema-version>/<project-slug>/<analysis-hash>.json # cached stats results (see §4)
 ├── charts/
@@ -225,7 +229,8 @@ hardcodes one.
       "pl": {"title": "Głodówka przerywana", "wiki": "pl.wikipedia", "redirect_from": null, "exists": true},
       "cs": {"title": "Přerušovaný půst", "wiki": "cs.wikipedia", "redirect_from": "Intermitentní půst", "exists": true},
       "uk": {"wiki": "uk.wikipedia", "exists": false, "reason": "no_sitelink"}
-    }
+    },
+    "category_qids": ["Q_EXAMPLE_CAT"]
   },
   "warnings": ["uk: no Wikidata sitelink for this QID"]
 }
@@ -235,6 +240,14 @@ responses don't return one (confirmed in Milestone 0). Ambiguity is
 conveyed by list order (server-ranked) plus `match_type` (`"label"` vs.
 `"alias"`); an invented `score` field from an earlier draft has been
 removed.
+
+`cluster.category_qids` (Milestone 13): the topic QID's own "instance of"/
+"subclass of" claims (P31/P279), fetched in the same `wbgetentities` call as
+`sitelinks` (one `props=sitelinks|claims` request, not an extra round-trip).
+Persisted on the saved project and used by `analyze`'s placebo test (§5,
+§9 item 1) to exclude thematically related articles from the comparison
+basket — see `references/stats-methods.md` for why P31/P279 rather than a
+literal "category" property.
 
 **Redirect aliases are tracked separately by AQS pageviews** — confirmed in
 Milestone 0, a redirect title (e.g. `cs`'s `Intermitentní půst` above)
@@ -263,7 +276,7 @@ last 730 days, clamped with a warning to AQS's actual earliest date — see
 ```json
 {
   "project": "intermittent-fasting-pl-cs",
-  "fetched": {"articles_fetched": 2, "redirect_aliases_fetched": 1, "days_requested": 730, "days_from_cache": 700, "days_freshly_fetched": 30, "http_requests_made": 4},
+  "fetched": {"articles_fetched": 2, "redirect_aliases_fetched": 1, "days_requested": 730, "days_from_cache": 700, "days_freshly_fetched": 30, "http_requests_made": 4, "basket_candidates_sourced": 0},
   "coverage": {
     "pl": {"wiki": "pl.wikipedia", "article": "Głodówka przerywana", "redirect_alias_included": null, "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 4},
     "cs": {"wiki": "cs.wikipedia", "article": "Přerušovaný půst", "redirect_alias_included": "Intermitentní půst", "first_day": "2024-09-22", "last_day": "2026-09-21", "missing_days": 0, "zero_fill_days": 1}
@@ -277,6 +290,12 @@ canonical title alone (`null`) or canonical + one summed redirect alias
 can state plainly whether redirect traffic was folded in for that
 language.
 No raw daily arrays in stdout — those live only in `cache/raw/`.
+
+`fetched.basket_candidates_sourced` (Milestone 13): how many placebo-basket
+candidates were freshly sourced+cached this run for the project's wiki(s)
+— `0` on any call that hits an already-this-month-sourced `cache/basket/`
+file (the common case; sourcing happens at most once per wiki per calendar
+month). See `references/stats-methods.md` and `references/caching.md`.
 
 ### 3.3 `analyze`
 Compute normalization, Theil-Sen/Mann-Kendall trend (with-spikes and
@@ -551,9 +570,19 @@ happened.
    **Resolved (Milestone 5):** yes, 10 (`stats/placebo.py`'s
    `MIN_ELIGIBLE_FOR_VERDICT`) — below that, `compute_verdict` returns an
    explicit "insufficient comparison data" verdict rather than a noisy
-   percentile. Caveat carried forward, not new: no live basket-*sourcing*
-   mechanism exists yet (Milestone 6's own scope boundary), so this
-   threshold is currently always hit — see `references/stats-methods.md`.
+   percentile.
+   **Basket sourcing itself resolved (Milestone 13):** `fetch` now sources
+   a wiki's candidate pool live (AQS "top articles" + a per-title Wikidata
+   lookup for category QIDs, `wikimedia/basket_source.py`), cached under
+   `cache/basket/<wiki>.json` at most once per calendar month
+   (`cache/basket.py`); `analyze` reads that cache plus each candidate's
+   own pageview series (never the network) to compute real basket slopes.
+   A project whose wiki predates this milestone (or was fetched with
+   basket sourcing disabled) still degrades to the always-"insufficient"
+   path Milestone 6 shipped — not an error, just no basket yet. See
+   `references/stats-methods.md` for the sourcing mechanism and why P31/
+   P279 claims stand in for "the topic's Wikidata category tree" (no
+   single Wikidata property is literally named that).
 2. **No Wikidata sitelink for a requested language.** Current design skips
    that language with a warning (graceful degradation). An alternative —
    falling back to a cross-wiki title search without a formal sitelink — is

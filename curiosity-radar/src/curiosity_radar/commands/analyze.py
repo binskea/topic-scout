@@ -8,13 +8,15 @@ cache file contents used — so bumping `SCHEMA_VERSION` (whenever the
 trend/spike/placebo logic or thresholds change) invalidates only derived
 results, never triggers a raw refetch (SPEC.md §4).
 
-Placebo-basket **sourcing** is intentionally not implemented here: SPEC.md
-§9 item 1 leaves the exact live-sourcing mechanism as an open question,
-and Milestone 5 built only the pure selection/verdict math against a
-caller-supplied candidate pool. Passing an empty pool through the same,
-already-tested `stats.placebo.compute_verdict` path yields an honest
-"insufficient comparison data" verdict rather than a fabricated one or a
-bare `null` — see PLAN.md Milestone 5/6 for the full reasoning.
+Milestone 13: placebo-basket **sourcing** now exists (`fetch`'s
+`wikimedia/basket_source.py` + `cache/basket.py`, SPEC.md §9 item 1
+resolved) — this module reads that cache plus each candidate's own
+pageview series (never the network, per SPEC.md §2) to compute the
+candidates' own slopes and feed a real basket into `stats.placebo`. A
+project whose wiki was never `fetch`ed with basket sourcing enabled (or
+predates Milestone 13) simply has no `cache/basket/` file yet; that's not
+an error, it degrades to the same empty-pool "insufficient comparison
+data" verdict Milestone 6 always produced — never a crash on an old cache.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from curiosity_radar import clock, project_state
+from curiosity_radar.cache import basket as basket_cache
 from curiosity_radar.cache import store
 from curiosity_radar.cache.paths import resolve_data_dir
 from curiosity_radar.errors import CommandError
@@ -128,6 +131,12 @@ def _collect_raw_file_hashes(data_root: Path, state: ProjectState) -> list[str]:
         wikis_seen.add(article.wiki)
     for wiki in wikis_seen:
         hashes.extend(_hash_dir(store.raw_dir(data_root, wiki, store.AGGREGATE_SLOT, GRANULARITY)))
+        meta = basket_cache.load(data_root, wiki)
+        if meta is None:
+            continue
+        hashes.append(meta.model_dump_json())
+        for candidate in meta.candidates:
+            hashes.extend(_hash_dir(store.raw_dir(data_root, wiki, candidate.title, GRANULARITY)))
     return hashes
 
 
@@ -149,6 +158,7 @@ def _compute_analysis_hash(
             "exclusions": sorted(f"{e.start}:{e.end}" for e in state.exclusions),
             "date_range": [state.date_range_start, state.date_range_end],
             "placebo_basket_size": placebo_basket_size,
+            "category_qids": sorted(state.category_qids),
             "schema_version": SCHEMA_VERSION,
         },
         sort_keys=True,
@@ -230,6 +240,74 @@ def build_language_series(
     )
 
 
+@dataclass
+class _CandidateStats:
+    title: str
+    avg_daily_views: float
+    category_qids: frozenset[str]
+    slope: float
+
+
+def _load_basket_candidates(
+    data_root: Path,
+    wiki: str,
+    start: date,
+    end: date,
+    excluded: set[str],
+    today: date,
+    exclude_titles: set[str],
+) -> list[_CandidateStats]:
+    """Real placebo-basket candidates for `wiki` (Milestone 13): reads
+    `cache/basket/<wiki>.json`'s candidate list plus each candidate's own
+    cached pageview series (fetched by `fetch`, never here) and computes
+    the same normalized Theil-Sen slope `_analyze_language` computes for
+    the topic itself, so the two are directly comparable.
+
+    `exclude_titles` drops the topic's own article (and its redirect
+    alias) should either happen to also appear in the sourced candidate
+    pool — category-QID exclusion should already prevent this in practice,
+    but a literal title match is a cheap, robust belt-and-suspenders check
+    that doesn't depend on the candidate having any Wikidata claims at all.
+    A candidate with too little cached data (`trend.check_sufficiency`)
+    is silently skipped, same as a topic with insufficient data never gets
+    a trend computed at all.
+    """
+    meta = basket_cache.load(data_root, wiki)
+    if meta is None:
+        return []
+
+    aggregate_by_day = store.read_cached_range(
+        data_root, wiki, store.AGGREGATE_SLOT, GRANULARITY, start, end, today
+    )
+
+    results: list[_CandidateStats] = []
+    for candidate in meta.candidates:
+        if candidate.title in exclude_titles:
+            continue
+        raw_by_day = store.read_cached_range(
+            data_root, wiki, candidate.title, GRANULARITY, start, end, today
+        )
+        days = sorted(d for d in raw_by_day if d not in excluded)
+        if not days:
+            continue
+        raw_views = [raw_by_day[d] for d in days]
+        if not trend.check_sufficiency(raw_views).sufficient:
+            continue
+        aggregate_views = [aggregate_by_day.get(d, 0) for d in days]
+        day_offsets = [(date.fromisoformat(d) - start).days for d in days]
+        normalized = normalize.normalize_by_aggregate(raw_views, aggregate_views)
+        candidate_trend = trend.compute_trend(normalized, x=day_offsets)
+        results.append(
+            _CandidateStats(
+                title=candidate.title,
+                avg_daily_views=sum(raw_views) / len(raw_views),
+                category_qids=frozenset(candidate.category_qids),
+                slope=candidate_trend.theil_sen_slope_per_day,
+            )
+        )
+    return results
+
+
 def _insufficient_trend() -> TrendResult:
     return TrendResult(
         theil_sen_slope_per_day=0.0,
@@ -245,7 +323,8 @@ def _analyze_language(
     end: date,
     excluded: set[str],
     today: date,
-    placebo_basket_size: int,  # not yet used — no basket-sourcing mechanism exists yet
+    placebo_basket_size: int,
+    topic_category_qids: frozenset[str],
 ) -> LanguageAnalysis:
     series = build_language_series(data_root, article, start, end, excluded, today)
     days, raw_views, day_offsets = series.days, series.raw_views, series.day_offsets
@@ -292,10 +371,27 @@ def _analyze_language(
     else:
         trend_excluding_spikes = normalized_trend
 
-    # No live basket-sourcing mechanism yet (see module docstring) — an
-    # empty candidate pool still yields a real, honest Placebo verdict via
-    # the same tested path a populated one would.
-    basket_slopes: list[float] = []
+    assert article.title is not None  # guaranteed by `resolved_articles`'s own filter
+    exclude_titles = {article.title}
+    if article.redirect_from:
+        exclude_titles.add(article.redirect_from)
+    candidate_stats = _load_basket_candidates(
+        data_root, article.wiki, start, end, excluded, today, exclude_titles
+    )
+    topic_avg_views = sum(raw_views) / len(raw_views)
+    selected = placebo.select_basket(
+        [
+            placebo.CandidateArticle(
+                title=c.title, avg_daily_views=c.avg_daily_views, category_qids=c.category_qids
+            )
+            for c in candidate_stats
+        ],
+        topic_avg_views=topic_avg_views,
+        exclude_category_qids=topic_category_qids,
+        basket_size=placebo_basket_size,
+    )
+    slope_by_title = {c.title: c.slope for c in candidate_stats}
+    basket_slopes = [slope_by_title[c.title] for c in selected]
     placebo_result = placebo.compute_verdict(
         normalized_trend.theil_sen_slope_per_day, basket_slopes
     )
@@ -334,10 +430,18 @@ def _compute_analysis(
     start, end = analysis_date_range(state)
     excluded = excluded_days(state, start, end)
 
+    topic_category_qids = frozenset(state.category_qids)
     languages: dict[str, LanguageAnalysis] = {}
     for lang, article in resolved_articles(state).items():
         languages[lang] = _analyze_language(
-            data_root, article, start, end, excluded, today, placebo_basket_size
+            data_root,
+            article,
+            start,
+            end,
+            excluded,
+            today,
+            placebo_basket_size,
+            topic_category_qids,
         )
 
     ranking = _rank_languages(languages) if compare_languages else []

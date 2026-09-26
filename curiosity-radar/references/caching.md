@@ -70,19 +70,51 @@ A month with no cache file at all (never fetched) is simply absent from the
 result, not zero-filled — don't confuse "never fetched" with "fetched and
 found empty."
 
+## Placebo-basket candidate cache (`cache/basket/<wiki>.json`)
+
+**Key**: wiki only (not project/topic) — directory path
+`cache/basket/<url-encoded wiki>.json`, one file per wiki, holding the
+candidate titles + Wikidata category QIDs `fetch` last sourced for it
+(Milestone 13, `SPEC.md` §9 item 1). Written by `fetch`
+(`cache/basket.py::save`), read by `analyze` (`commands/analyze.py::
+_load_basket_candidates`) — `analyze` never sources or refreshes this
+cache itself, only reads it, same as raw pageview data.
+
+**Refresh cadence**: at most once per calendar month per wiki
+(`cache/basket.py::needs_refresh` compares the file's `sourced_month`
+against the current one) — a Wikidata lookup per candidate isn't cheap
+enough to repeat on every `fetch`, and which articles are currently
+popular doesn't meaningfully change day to day. `fetch.BASKET_POOL_SIZE`
+(**20** by default, `0` disables sourcing entirely) controls how many
+candidates are sourced when a refresh does happen.
+
+**Not itself a pageview cache**: this file holds only *which* titles are
+candidates and their category QIDs. Each candidate's actual daily pageview
+series is fetched and cached the ordinary way, under `cache/raw/` exactly
+like any project article (same closed/open-month rules above) — a
+candidate is just another cached article, sharing the same "overlapping
+requests naturally share files" cache scheme.
+
 ## Derived-stats cache (`cache/derived/<schema-version>/<project-slug>/<hash>.json`)
 
 Written by `analyze`, one file per distinct `(project, exclusions,
-date-range, placebo-basket-size, raw-data-actually-used, stats-code-
-version)` combination. The hash (`analyze._compute_analysis_hash`) covers:
+date-range, placebo-basket-size, category-qids, raw-data-actually-used,
+stats-code-version)` combination. The hash (`analyze._compute_analysis_hash`)
+covers:
 - the project slug,
 - **every raw cache file's own content hash** that this analysis actually
-  read (per-article + redirect-alias + aggregate, per resolved language —
-  `_collect_raw_file_hashes`, SHA-256 of each `cache/raw/.../*.json` file
-  under the relevant directories),
+  read (per-article + redirect-alias + aggregate, per resolved language,
+  **plus each wiki's `cache/basket/` file and every one of its candidates'
+  raw cache files** — `_collect_raw_file_hashes`, SHA-256 of each
+  `cache/raw/.../*.json` file under the relevant directories), so a basket
+  candidate's data changing (a fresh sourcing pass, a new day fetched)
+  invalidates the derived cache exactly like the topic's own data changing
+  would,
 - sorted exclusion ranges,
 - the project's date range,
 - `placebo_basket_size`,
+- the project's `category_qids` (Milestone 13 — a different topic
+  category set changes which basket candidates get excluded),
 - `SCHEMA_VERSION` (a constant in `analyze.py`, bumped whenever the
   Theil-Sen/Mann-Kendall/MAD/placebo *logic or thresholds* change).
 

@@ -39344,7 +39344,7 @@
       ]
     }
   },
-  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_LEARN_ENGLISH&props=sitelinks": {
+  "GET https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q_EVAL_LEARN_ENGLISH&props=sitelinks%7Cclaims": {
     "body": {
       "entities": {
         "Q_EVAL_LEARN_ENGLISH": {

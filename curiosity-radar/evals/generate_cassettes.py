@@ -150,7 +150,12 @@ def _manifest_for_scenario(scenario: Scenario) -> dict[str, dict]:
     entities_key = _key(
         "GET",
         WIKIDATA_API,
-        {"action": "wbgetentities", "ids": scenario.qid, "props": "sitelinks", "format": "json"},
+        {
+            "action": "wbgetentities",
+            "ids": scenario.qid,
+            "props": "sitelinks|claims",
+            "format": "json",
+        },
     )
     manifest[entities_key] = {
         "body": {

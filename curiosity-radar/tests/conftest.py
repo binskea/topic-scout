@@ -83,6 +83,13 @@ def _generic_fake_handler(request: httpx.Request) -> httpx.Response:
             },
         )
 
+    if "wikidata.org" in url and action == "wbgetentities" and "sites" in query:
+        # `wikimedia/basket_source.py`'s per-title Wikidata lookup — the
+        # generic net doesn't need to simulate a real candidate pool since
+        # `BASKET_POOL_SIZE` is patched to 0 by default (below), but this
+        # keeps the fake handler total in case a test re-enables it.
+        return httpx.Response(200, json={"entities": {}})
+
     if action == "query" and "titles" in query:
         title = _param(query, "titles")
         return httpx.Response(
@@ -92,6 +99,10 @@ def _generic_fake_handler(request: httpx.Request) -> httpx.Response:
                 "query": {"pages": {"1": {"pageid": 1, "ns": 0, "title": title}}},
             },
         )
+
+    if "wikimedia.org/api/rest_v1/metrics/pageviews/top/" in url:
+        # AQS "top articles" (basket sourcing) — same reasoning as above.
+        return httpx.Response(200, json={"items": []})
 
     if "wikimedia.org/api/rest_v1/metrics/pageviews" in url:
         # No fixture-driven traffic needed for the generic bootstrap path —
@@ -113,3 +124,14 @@ def _no_live_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(http_module, "build_client", fake_build_client)
     monkeypatch.setattr(resolve_cmd, "build_client", fake_build_client)
     monkeypatch.setattr(fetch_cmd, "build_client", fake_build_client)
+
+
+@pytest.fixture(autouse=True)
+def _basket_sourcing_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Milestone 13's placebo-basket sourcing adds new HTTP calls to every
+    `fetch` run — off by default here so the many existing tests that build
+    an exact `SequentialCassette` (test_fetch_and_cache.py's pre-Milestone-13
+    tests, etc.) don't need to enumerate those calls too. Tests that
+    actually exercise basket sourcing re-enable it explicitly with
+    `monkeypatch.setattr(fetch_cmd, "BASKET_POOL_SIZE", <n>)`."""
+    monkeypatch.setattr(fetch_cmd, "BASKET_POOL_SIZE", 0)
